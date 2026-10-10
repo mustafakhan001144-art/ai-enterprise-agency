@@ -1,14 +1,16 @@
 """Job intake shared by the forensics and archeology routes, plus job status lookup.
 
-The gateway only meters, persists and queues work. Execution belongs to the
-orchestrator (Phase 3), which picks up `queued` jobs and runs their runbook.
+The gateway only meters, persists and queues work. The worker (core/worker.py)
+claims `queued` jobs and runs their runbook through core/orchestrator.py.
 """
 
 import json
 import math
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 
 from api.db import connect, debit_credits, new_id, now_iso
 from api.middleware.auth import Principal, Subscriber
@@ -88,15 +90,42 @@ async def list_jobs(
     return JobPage(jobs=[JobSummary(job_id=row["id"], **{k: row[k] for k in row.keys() if k != "id"}) for row in rows])
 
 
-@router.get("/{job_id}", response_model=JobStatus)
-async def get_job(job_id: str, request: Request, principal: Subscriber) -> JobStatus:
+JOB_COLUMNS = (
+    "id, kind, runbook, status, credits_charged, attempts, error, result_digest, result_path, "
+    "created_at, updated_at, started_at, finished_at"
+)
+
+
+async def _own_job(request: Request, principal: Principal, job_id: str):
     async with connect(request.app.state.settings.database_path) as conn:
         cursor = await conn.execute(
-            "SELECT id, kind, runbook, status, credits_charged, created_at, updated_at "
-            "FROM jobs WHERE id = ? AND account_id = ?",
+            f"SELECT {JOB_COLUMNS} FROM jobs WHERE id = ? AND account_id = ?",
             (job_id, principal.account_id),
         )
         row = await cursor.fetchone()
     if row is None:
+        # Another tenant's job is indistinguishable from a missing one.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
-    return JobStatus(job_id=row["id"], **{k: row[k] for k in row.keys() if k != "id"})
+    return row
+
+
+@router.get("/{job_id}", response_model=JobStatus)
+async def get_job(job_id: str, request: Request, principal: Subscriber) -> JobStatus:
+    row = await _own_job(request, principal, job_id)
+    fields = {k: row[k] for k in row.keys() if k not in ("id", "result_path")}
+    result_url = f"/api/v1/jobs/{job_id}/result" if row["status"] == "succeeded" else None
+    return JobStatus(job_id=row["id"], result_url=result_url, **fields)
+
+
+@router.get("/{job_id}/result")
+async def get_job_result(job_id: str, request: Request, principal: Subscriber) -> JSONResponse:
+    """The JobResult/v1 document for a succeeded job: every stage report plus their digests."""
+    row = await _own_job(request, principal, job_id)
+    if row["status"] != "succeeded" or not row["result_path"]:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"job is {row['status']}, no result yet")
+    path = Path(row["result_path"]).resolve()
+    jobs_root = request.app.state.settings.jobs_dir.resolve()
+    if not path.is_relative_to(jobs_root / job_id) or not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="result file missing")
+    body = json.loads(path.read_text(encoding="utf-8"))
+    return JSONResponse(body, headers={"X-Result-Digest": row["result_digest"] or ""})

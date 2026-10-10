@@ -13,12 +13,14 @@ from fastapi.responses import JSONResponse
 
 from api.db import connect, init_db
 from api.middleware.body_limit import BodySizeLimitMiddleware
-from api.routes import account, archeology, forensics, jobs, stripe_webhooks
+from api.routes import account, agents, archeology, forensics, jobs, stripe_webhooks
 from api.settings import GatewaySettings, get_settings
+from core.registry import AgentRegistry, default_registry
 
 
-def create_app(settings: GatewaySettings | None = None) -> FastAPI:
+def create_app(settings: GatewaySettings | None = None, registry: AgentRegistry | None = None) -> FastAPI:
     settings = settings or get_settings()
+    registry = registry or default_registry()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -35,12 +37,14 @@ def create_app(settings: GatewaySettings | None = None) -> FastAPI:
         redoc_url=None,
     )
     app.state.settings = settings
+    app.state.registry = registry
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_bytes)
 
     app.include_router(forensics.router)
     app.include_router(archeology.router)
     app.include_router(jobs.router)
     app.include_router(account.router)
+    app.include_router(agents.router)
     app.include_router(stripe_webhooks.router)
 
     @app.get("/healthz", tags=["ops"])
