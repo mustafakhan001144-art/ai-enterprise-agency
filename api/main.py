@@ -20,7 +20,7 @@ from core.registry import AgentRegistry, default_registry
 
 def create_app(settings: GatewaySettings | None = None, registry: AgentRegistry | None = None) -> FastAPI:
     settings = settings or get_settings()
-    registry = registry or default_registry()
+    registry = registry or default_registry(settings.installed_agents_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -31,7 +31,7 @@ def create_app(settings: GatewaySettings | None = None, registry: AgentRegistry 
 
     app = FastAPI(
         title="AI Enterprise Agency API",
-        version="1.2.0",
+        version="1.3.0",
         lifespan=lifespan,
         docs_url=None if settings.environment == "production" else "/docs",
         redoc_url=None,

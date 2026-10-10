@@ -275,6 +275,47 @@ def _governance_section(outputs: dict) -> list[str]:
     return lines
 
 
+def _specialists_section(outputs: dict) -> list[str]:
+    roster = outputs.get("specialist_roster")
+    if not roster:
+        return []
+    catalog = roster.get("catalog") or {}
+    lines = [
+        "## Specialist team",
+        "",
+        f"Routed from the Agency Agents catalog ({catalog.get('agents_available', 0)} agents available, "
+        f"{catalog.get('installed_copies_used', 0)} of the assigned agents read from this machine's installed "
+        f"copy). Status **{roster.get('status')}**.",
+        "",
+    ]
+    if roster.get("assignments"):
+        lines += ["| Specialist | Role | Works from | Task | Triggered by |", "|---|---|---|---|---|"]
+        for a in roster["assignments"]:
+            lines.append(
+                f"| {_cell(a['name'])} (`{a['agent_id']}`) | {a['role']} | {a['works_from_stage']} "
+                f"| {_cell(a['task'])} | {_cell(', '.join(a['triggered_by']))} |"
+            )
+        lines.append("")
+    if roster.get("not_found"):
+        lines += [f"Not in the catalog: {_cell(', '.join(roster['not_found']))}.", ""]
+    consults = outputs.get("specialist_consults")
+    if consults:
+        lines += [
+            "### Specialist notes",
+            "",
+            "_Each note was written by a language model using that specialist's catalog prompt and the one report "
+            "named. The findings above are authoritative._",
+            "",
+        ]
+        for c in consults.get("consults") or []:
+            lines += [f"#### {_cell(c['name'])}", ""]
+            if c.get("status") == "COMPLETE" and c.get("notes_markdown"):
+                lines += [str(c["notes_markdown"]).replace("\r", ""), ""]
+            else:
+                lines += [f"Not available: {_cell(c.get('detail'))}.", ""]
+    return lines
+
+
 def render_report(result: dict, job_id: str) -> str:
     lines = [
         f"# Job report: {result.get('runbook')}",
@@ -294,7 +335,8 @@ def render_report(result: dict, job_id: str) -> str:
         "|---|---|---|",
     ]
     for agent in result.get("agents") or []:
-        lines.append(f"| {agent['agent_id']} | {agent.get('version')} | `{agent.get('prompt_sha256')}` |")
+        version = agent.get("version") or f"catalog ({agent.get('location', 'repository')})"
+        lines.append(f"| {agent['agent_id']} | {version} | `{agent.get('prompt_sha256')}` |")
     lines += ["", "## Stages", "", "| # | Stage | Status | Failed checks | Digest |", "|---|---|---|---|---|"]
     for stage in result.get("stages") or []:
         failed = ", ".join(stage.get("self_validation_failed") or []) or "none"
@@ -307,6 +349,7 @@ def render_report(result: dict, job_id: str) -> str:
     elif result.get("runbook") == "legacy_archeology_sweep":
         lines += _archaeology_section(outputs)
     lines += [""] + _governance_section(outputs)
+    lines += _specialists_section(outputs)
     lines += [
         "",
         "## Verifying this report",

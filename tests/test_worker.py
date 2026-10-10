@@ -88,16 +88,22 @@ def test_worker_runs_forensics_job_and_result_is_served(client, make_account, se
         "quality_review",
         "executive_brief",
         "follow_up_proposal",
+        "specialist_roster",
     ]
     assert body["outputs"]["trace_analysis"]["primary_class"] == "DATA_EXFILTRATION"
     assert body["outputs"]["containment_plan"]["tier"] == "T1_KILL"
-    assert {a["agent_id"] for a in body["agents"]} == {
+    agent_ids = {a["agent_id"] for a in body["agents"]}
+    assert {a for a in agent_ids if not a.startswith("upstream.")} == {
         "forensics.ai-trace-analyst",
         "forensics.agent-containment-specialist",
         "management.quality-reviewer",
         "management.engagement-director",
         "marketing.engagement-proposal-writer",
     }
+    roster = body["outputs"]["specialist_roster"]
+    assert roster["status"] == "STAFFED"
+    assert "upstream.security.security-incident-responder" in agent_ids
+    assert {a["agent_id"] for a in roster["assignments"]} <= agent_ids
     assert all(not s["self_validation_failed"] for s in body["stages"])
     job_dir = settings.jobs_dir / job_id
     assert (job_dir / "stages" / "01_trace_analysis.json").is_file()
@@ -116,6 +122,7 @@ def test_worker_runs_archaeology_job_and_deletes_client_source(client, make_acco
         "quality_review",
         "executive_brief",
         "follow_up_proposal",
+        "specialist_roster",
     ]
     units = {u["unit_id"] for u in body["outputs"]["code_archaeology"]["units"]}
     assert "app/main.py::fetch" in units

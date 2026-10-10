@@ -159,6 +159,8 @@ class AgentInfo(BaseModel):
     downstream: list[str]
     path: str
     prompt_sha256: str
+    location: str = "repository"
+    modified: bool = False
 
 
 class DivisionInfo(BaseModel):
@@ -172,3 +174,4 @@ class AgentPage(BaseModel):
     agents: list[AgentInfo]
     divisions: list[DivisionInfo]
     warnings: list[str]
+    installed: dict = {}
