@@ -7,9 +7,15 @@ follow-up proposal. All of these are deterministic Python implementations of the
 procedure their agent persona defines (see core/agents), so the same input always
 produces the same reports.
 
-When a narrator is configured (core/llm.py), one more stage, ``client_narrative``,
-asks a language model to reword the brief and proposal for a non-technical reader.
-It is the only stage that is not deterministic, and its failure never fails the job.
+After governance, the engagement director's ``specialist_roster`` stage routes the
+job to specialists from the Agency Agents catalog (core/workflows/specialists.py),
+using the installed copy of the catalog when one is configured.
+
+When a language model is configured (core/llm.py), up to two more stages run:
+``specialist_consults`` asks the first routed specialists, each with its own catalog
+prompt, for actions on the report it works from, and ``client_narrative`` rewords the
+brief and proposal for a non-technical reader. These are the only stages that are not
+deterministic, and their failure never fails the job.
 
 Stage outputs are written to ``<job_dir>/stages/NN_<stage_id>.json`` and the
 combined result to ``<job_dir>/result.json``.
@@ -25,9 +31,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from core.evidence import write_bundle
-from core.llm import narrative_report
+from core.llm import Consultant, consult_entry, consults_report, narrative_report
 from core.registry import AgentRegistry, RegistryError
-from core.workflows import archaeology, forensics, management, marketing
+from core.workflows import archaeology, forensics, management, marketing, specialists
 from core.workflows.common import canonical_digest
 
 RESULT_SCHEMA = "JobResult/v1"
@@ -132,6 +138,29 @@ def _governance(runbook_id: str, technical: list[tuple[str, dict]], run_id: str)
     return [("quality_review", qa), ("executive_brief", brief), ("follow_up_proposal", proposal)]
 
 
+def _consult(
+    roster: dict, outputs: dict, registry: AgentRegistry, consultant: Consultant, limit: int, run_id: str
+) -> dict:
+    chosen, skipped = roster["assignments"][:limit], [a["agent_id"] for a in roster["assignments"][limit:]]
+    entries = []
+    for assignment in chosen:
+        material = outputs.get(assignment["works_from_stage"]) or {}
+        try:
+            entries.append(consultant(assignment, registry.prompt_body(assignment["agent_id"]), material))
+        except Exception as exc:  # noqa: BLE001 - a consult is advisory; the audit result stands without it
+            entries.append(
+                consult_entry(assignment, material, status="FAILED", model=None, text=None, detail=type(exc).__name__)
+            )
+    return consults_report(entries, run_id, skipped)
+
+
+def _generated_by(narrative: bool, consults: bool) -> str:
+    llm = [name for name, used in (("specialist_consults", consults), ("client_narrative", narrative)) if used]
+    if not llm:
+        return "deterministic procedure implementations; no language model was called"
+    return f"deterministic procedure implementations; {' and '.join(llm)} written by a language model"
+
+
 def run_job(
     runbook_id: str,
     request: dict,
@@ -140,6 +169,8 @@ def run_job(
     registry: AgentRegistry,
     fetcher: Fetcher = archaeology.git_fetch,
     narrator: Narrator | None = None,
+    consultant: Consultant | None = None,
+    max_consults: int = 3,
 ) -> RunOutcome:
     runbook = RUNBOOKS.get(runbook_id)
     if runbook is None:
@@ -155,6 +186,12 @@ def run_job(
         shutil.rmtree(stages_dir)  # a retried attempt starts clean
     reports = runbook.run(request, job_dir, run_id, fetcher)
     reports += _governance(runbook_id, reports, run_id)
+    roster = specialists.specialist_roster(runbook_id, dict(reports), registry.snapshot(), run_id)
+    reports.append(("specialist_roster", roster))
+    if consultant is not None and max_consults > 0:
+        reports.append(
+            ("specialist_consults", _consult(roster, dict(reports), registry, consultant, max_consults, run_id))
+        )
     if narrator is not None:
         brief, proposal = dict(reports)["executive_brief"], dict(reports)["follow_up_proposal"]
         try:
@@ -170,14 +207,14 @@ def run_job(
         "schema_version": RESULT_SCHEMA,
         "runbook": runbook_id,
         "run_id": run_id,
-        "agents": [{"agent_id": a.agent_id, "version": a.version, "prompt_sha256": a.prompt_sha256} for a in agents],
+        "agents": [{"agent_id": a.agent_id, "version": a.version, "prompt_sha256": a.prompt_sha256} for a in agents]
+        + [
+            {"agent_id": a["agent_id"], "version": None, "prompt_sha256": a["prompt_sha256"], "location": a["location"]}
+            for a in roster["assignments"]
+        ],
         "stages": stage_index,
         "outputs": {stage_id: report for stage_id, report in reports},
-        "generated_by": (
-            "deterministic procedure implementations; client_narrative was written by a language model"
-            if narrator
-            else "deterministic procedure implementations; no language model was called"
-        ),
+        "generated_by": _generated_by(narrator is not None, any(s == "specialist_consults" for s, _ in reports)),
     }
     digest = canonical_digest(result)
     result_path = job_dir / "result.json"

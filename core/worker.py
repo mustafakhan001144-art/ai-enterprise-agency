@@ -28,7 +28,7 @@ from pathlib import Path
 
 from api.db import connect, init_db, now_iso, refund_credits
 from api.settings import CoreSettings, get_core_settings
-from core.llm import narrator_from_settings
+from core.llm import Consultant, narrator_from_settings
 from core.orchestrator import Fetcher, Narrator, PermanentJobError, run_job
 from core.registry import AgentRegistry, default_registry
 from core.workflows import archaeology
@@ -63,10 +63,12 @@ class Worker:
         worker_id: str | None = None,
         fetcher: Fetcher = archaeology.git_fetch,
         narrator: Narrator | None = None,
+        consultant: Consultant | None = None,
     ):
         self.settings = settings
         self.narrator = narrator
-        self.registry = registry or default_registry()
+        self.consultant = consultant
+        self.registry = registry or default_registry(settings.installed_agents_dir)
         self.worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         self.fetcher = fetcher
 
@@ -148,6 +150,8 @@ class Worker:
                 self.registry,
                 self.fetcher,
                 self.narrator,
+                self.consultant,
+                self.settings.llm_max_consults,
             )
         except PermanentJobError as exc:
             log.warning("job %s failed permanently: %s", job["id"], exc)
@@ -186,14 +190,16 @@ class Worker:
 async def _main(once: bool) -> int:
     settings = get_core_settings()
     await init_db(settings.database_path)
-    worker = Worker(settings, narrator=narrator_from_settings(settings))
+    narrator = narrator_from_settings(settings)
+    worker = Worker(settings, narrator=narrator, consultant=getattr(narrator, "consult", None))
     snapshot = worker.registry.snapshot()
     for warning in snapshot.warnings:
         log.warning("registry: %s", warning)
     log.info(
-        "worker %s ready with %d agents; language-model narrative %s",
+        "worker %s ready with %d agents (%d from an installed folder); language-model narrative %s",
         worker.worker_id,
         len(snapshot.agents),
+        sum(1 for a in snapshot.agents.values() if a.location == "installed"),
         f"on ({settings.llm_model})" if worker.narrator else "off",
     )
     if once:

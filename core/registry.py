@@ -7,6 +7,11 @@ Agents are Markdown files with YAML front matter. Two sources are loaded:
 * upstream agents from the pinned ``vendor/agency-agents`` submodule, one division per
   entry in its ``divisions.json``. They need ``name`` and ``description`` and get the id
   ``upstream.<division>.<file stem>``.
+* optionally, an installed copy of that catalog: a flat folder of agent files such as
+  ``~/.claude/agents`` (where the Agency Agents installer puts them for Claude Code).
+  An installed file whose name matches a catalog agent replaces the vendored copy,
+  so jobs use exactly what is installed on the machine. Installed agents that are not
+  in the catalog are added to an ``installed`` division.
 
 The registry re-reads the files whenever their names, sizes or modification times
 change, so adding or editing an agent needs no restart. Prompt bodies are hashed, not
@@ -17,8 +22,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import yaml
@@ -45,6 +51,16 @@ class Agent:
     output_schema: str | None = None
     upstream: tuple[str, ...] = ()
     downstream: tuple[str, ...] = ()
+    # "repository" (custom or vendored file) or "installed" (the machine's installed copy).
+    location: str = "repository"
+    # True when the installed copy differs from the vendored catalog file.
+    modified: bool = False
+    # Absolute path used to read the prompt body. Not published.
+    file: str = field(default="", compare=False)
+
+    @property
+    def slug(self) -> str:
+        return self.agent_id.rsplit(".", 1)[-1]
 
     def public(self) -> dict:
         return {
@@ -59,6 +75,8 @@ class Agent:
             "downstream": list(self.downstream),
             "path": self.path,
             "prompt_sha256": self.prompt_sha256,
+            "location": self.location,
+            "modified": self.modified,
         }
 
 
@@ -67,6 +85,8 @@ class Snapshot:
     agents: dict[str, Agent] = field(default_factory=dict)
     divisions: dict[str, dict] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    # Summary of the installed-copy overlay; empty when no installed folder is configured.
+    installed: dict = field(default_factory=dict)
 
 
 def split_front_matter(text: str) -> tuple[dict, str] | None:
@@ -92,10 +112,17 @@ def _as_tuple(value) -> tuple[str, ...]:
 
 
 class AgentRegistry:
-    def __init__(self, custom_root: Path, upstream_root: Path | None, repo_root: Path = REPO_ROOT):
+    def __init__(
+        self,
+        custom_root: Path,
+        upstream_root: Path | None,
+        repo_root: Path = REPO_ROOT,
+        installed_root: Path | None = None,
+    ):
         self.custom_root = custom_root
         self.upstream_root = upstream_root
         self.repo_root = repo_root
+        self.installed_root = installed_root.expanduser() if installed_root else None
         self._lock = threading.Lock()
         self._fingerprint: tuple | None = None
         self._snapshot = Snapshot()
@@ -119,6 +146,15 @@ class AgentRegistry:
             raise RegistryError(f"agents not found in registry: {missing}")
         return [snap.agents[a] for a in agent_ids]
 
+    def prompt_body(self, agent_id: str) -> str:
+        """The agent's prompt without its front matter, read from the file the registry loaded."""
+        agent = self.get(agent_id)
+        if agent is None:
+            raise RegistryError(f"agent not found in registry: {agent_id}")
+        text = Path(agent.file).read_text(encoding="utf-8")
+        parsed = split_front_matter(text)
+        return (parsed[1] if parsed else text).strip()
+
     # -- loading ------------------------------------------------------------
     def _files(self) -> list[Path]:
         files: list[Path] = []
@@ -130,6 +166,8 @@ class AgentRegistry:
                 files.append(index)
                 for division in self._upstream_divisions(index):
                     files += sorted((self.upstream_root / division).rglob("*.md"))
+        if self.installed_root and self.installed_root.is_dir():
+            files += sorted(self.installed_root.glob("*.md"))
         return files
 
     def _compute_fingerprint(self) -> tuple:
@@ -156,6 +194,7 @@ class AgentRegistry:
             snap.divisions[division] = {"label": division.title(), "source": "custom", "agent_count": 0}
         self._load_custom(snap)
         self._load_upstream(snap)
+        self._load_installed(snap)
         for agent in snap.agents.values():
             snap.divisions[agent.division]["agent_count"] += 1
         for division, info in snap.divisions.items():
@@ -198,6 +237,7 @@ class AgentRegistry:
                 description=str(meta["description"]).strip(),
                 path=rel,
                 prompt_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                file=str(path.resolve()),
                 version=str(meta["version"]),
                 output_schema=str(meta["output_schema"]),
                 upstream=_as_tuple(meta.get("upstream")),
@@ -237,8 +277,66 @@ class AgentRegistry:
                     description=str(meta["description"]).strip(),
                     path=rel,
                     prompt_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                    file=str(path.resolve()),
                 )
 
+    def _load_installed(self, snap: Snapshot) -> None:
+        root = self.installed_root
+        if root is None:
+            return
+        summary = {"configured": True, "found": 0, "matched_catalog": 0, "modified": 0, "not_in_catalog": 0}
+        snap.installed = summary
+        if not root.is_dir():
+            snap.warnings.append("installed agents folder (AGENCY_INSTALLED_AGENTS_DIR) does not exist")
+            return
+        by_slug = {a.slug: a for a in snap.agents.values() if a.source == "upstream"}
+        for path in sorted(root.glob("*.md")):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            try:
+                parsed = split_front_matter(text)
+            except (ValueError, yaml.YAMLError):
+                snap.warnings.append(f"installed:{path.name}: skipped, invalid front matter")
+                continue
+            if parsed is None:
+                continue
+            meta, _ = parsed
+            if not meta.get("name") or not meta.get("description"):
+                continue
+            summary["found"] += 1
+            digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            common = {
+                "name": str(meta["name"]),
+                "description": str(meta["description"]).strip(),
+                "path": f"installed:{path.name}",
+                "prompt_sha256": digest,
+                "location": "installed",
+                "file": str(path.resolve()),
+            }
+            vendored = by_slug.get(path.stem)
+            if vendored is not None:
+                modified = digest != vendored.prompt_sha256
+                summary["matched_catalog"] += 1
+                summary["modified"] += int(modified)
+                snap.agents[vendored.agent_id] = replace(vendored, modified=modified, **common)
+                continue
+            if "installed" not in snap.divisions:
+                snap.divisions["installed"] = {
+                    "label": "Installed (not in catalog)",
+                    "source": "installed",
+                    "agent_count": 0,
+                }
+            agent_id = f"installed.{path.stem}"
+            summary["not_in_catalog"] += 1
+            snap.agents[agent_id] = Agent(agent_id=agent_id, division="installed", source="installed", **common)
 
-def default_registry() -> AgentRegistry:
-    return AgentRegistry(REPO_ROOT / "core" / "agents", REPO_ROOT / "vendor" / "agency-agents")
+
+def default_registry(installed_root: Path | None = None) -> AgentRegistry:
+    """The repository's agents, plus an installed copy of the catalog when a folder is given.
+
+    With no argument, ``AGENCY_INSTALLED_AGENTS_DIR`` from the process environment is used.
+    """
+    if installed_root is None and os.environ.get("AGENCY_INSTALLED_AGENTS_DIR"):
+        installed_root = Path(os.environ["AGENCY_INSTALLED_AGENTS_DIR"])
+    return AgentRegistry(
+        REPO_ROOT / "core" / "agents", REPO_ROOT / "vendor" / "agency-agents", installed_root=installed_root
+    )
