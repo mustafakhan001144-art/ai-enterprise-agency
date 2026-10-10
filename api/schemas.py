@@ -104,3 +104,38 @@ class JobStatus(BaseModel):
     credits_charged: int
     created_at: datetime
     updated_at: datetime
+
+
+class JobSummary(BaseModel):
+    job_id: str
+    kind: str
+    runbook: str
+    status: str
+    credits_charged: int
+    created_at: datetime
+
+
+class JobPage(BaseModel):
+    jobs: list[JobSummary]
+
+
+class AccountSummary(BaseModel):
+    account_id: str
+    subscription_status: str
+    credit_quota: int
+    credits_used: int
+    credits_remaining: int
+
+
+class LedgerEntry(BaseModel):
+    id: int
+    delta: int
+    reason: str
+    job_id: str | None
+    reference: str | None
+    created_at: datetime
+
+
+class LedgerPage(BaseModel):
+    entries: list[LedgerEntry]
+    next_before_id: int | None
