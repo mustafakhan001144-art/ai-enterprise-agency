@@ -1,8 +1,61 @@
 # Recovering and reconciling the Windows copy
 
-Status: **the Windows folder `D:\ai-enterprise-agency` has not been inspected
-and is not yet synchronized.** The cloud baseline is on GitHub; these steps fold
-the Windows work into it without overwriting either side.
+Status: **the Windows folder `D:\ai-enterprise-agency` was inspected on
+2026-10-10 and is not yet synchronized.**
+
+## What the inspection found
+
+| Path on Windows | State | Action |
+|---|---|---|
+| `.git` | absent: not a git repository | attach git (below) |
+| `api/__init__.py`, `api/main.py` | empty (0 bytes) | take the cloud versions |
+| `requirements.txt`, `.gitignore` | empty (0 bytes) | take the cloud versions |
+| `storage/code_sandboxes/` | empty folder | keep, ignored by git |
+| `.env` (413 bytes) | local secrets, contents not read | keep, ignored by git, never commit |
+| `.venv/` | Python 3.12.10 virtual environment | keep, ignored; reinstall packages from `requirements.lock` |
+| `vendor/agency-agents/` | clean clone of `msitarzewski/agency-agents` at `f99f6aa`, no local edits | becomes the pinned submodule as is |
+
+No Windows-only implementation work was found, so reconciliation reduces to
+filling the empty stub files from GitHub. Nothing with content is replaced.
+
+## Exact commands for this PC
+
+Run once the PR that adds the `vendor/agency-agents` submodule has merged into
+`develop`.
+
+```powershell
+# 1. Backup (keep it until everything below has worked)
+$stamp = Get-Date -Format "yyyyMMdd-HHmm"
+robocopy D:\ai-enterprise-agency "D:\ai-enterprise-agency-backup-$stamp" /E /XD .venv
+# 2. Attach git without touching any file
+Set-Location D:\ai-enterprise-agency
+git init
+git remote add origin https://github.com/mustafakhan001144-art/ai-enterprise-agency.git
+git fetch origin
+git symbolic-ref HEAD refs/heads/develop
+git reset origin/develop
+git branch --set-upstream-to=origin/develop
+# 3. Check: "modified" should list only .gitignore, api/main.py and requirements.txt; vendor/agency-agents must NOT appear
+git status
+# 4. Fill the empty stubs and the files that exist only on GitHub
+git restore .
+git submodule init
+git submodule status                      # should print " f99f6aa... vendor/agency-agents"
+git check-ignore -v .env .venv storage/code_sandboxes   # all three must be listed
+# 5. Install and test with the existing venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.lock
+pytest -q
+# 6. Verify sync
+git status                                # "Your branch is up to date with 'origin/develop'", nothing to commit
+git rev-parse HEAD
+git rev-parse origin/develop              # must match
+```
+
+If step 3 shows any other `modified:` file, or anything under
+`vendor/agency-agents`, stop and post the output in the project thread.
+
+The general procedure below covers cases this inspection did not find.
 
 Run everything in **Windows PowerShell**. Nothing below deletes or overwrites a
 file in `D:\ai-enterprise-agency`, except steps you choose yourself in step 5.
