@@ -13,6 +13,7 @@ state, and queues jobs that the core engine's orchestrator will execute.
 | `api/db.py` | SQLite schema: accounts, hashed API keys, Stripe events, jobs; atomic credit debit |
 | `api/middleware/` | API-key + subscription gate, request body size limit |
 | `api/routes/` | `forensics/contain`, `archeology/audit`, `jobs/{id}`, `webhooks/stripe` |
+| `vendor/agency-agents/` | Upstream agent library ([msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents), MIT), pinned git submodule |
 | `core/agents/` | Specialist personas: forensics (2), archaeology (2); management and marketing divisions are placeholders |
 | `tests/` | Gateway, auth, tenant isolation, metering, validation and Stripe webhook tests |
 
@@ -21,11 +22,12 @@ agent registry, and the management and marketing personas.
 
 ## Quick start
 
-Requires **Python 3.11** (3.12 should work; CI tests 3.11).
+Requires **Python 3.11 or 3.12** (CI tests both).
 
 Linux / macOS:
 
 ```bash
+git submodule update --init --recursive
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.lock
 cp .env.example .env          # then edit with Stripe TEST keys
@@ -36,6 +38,7 @@ uvicorn api.main:app --reload --port 8000
 Windows PowerShell:
 
 ```powershell
+git submodule update --init --recursive
 py -3.11 -m venv .venv; .\.venv\Scripts\Activate.ps1
 pip install -r requirements.lock
 Copy-Item .env.example .env   # then edit with Stripe TEST keys

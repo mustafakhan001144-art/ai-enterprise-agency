@@ -5,11 +5,13 @@ requires-python = ">=3.11,<3.13"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+norecursedirs = ["vendor", ".venv", "storage"]
 asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+extend-exclude = ["vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

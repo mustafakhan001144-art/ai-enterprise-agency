@@ -2,45 +2,33 @@
 
 ## Current state
 
-`vendor/agency-agents` is **absent** from the cloud workspace and from this
-repository. The Windows copy has not been inspected, so it may exist there
-(`scripts/inspect-local.ps1` reports which form it takes).
-
-The four custom personas in `core/agents/` are the agency's own work and do not
-depend on it. No code in `api/` imports or reads `vendor/`.
-
-## Recommended integration: pinned git submodule
-
-A submodule records one exact upstream commit, so both environments get
-identical agent files, upstream history and its MIT `LICENSE` stay intact, and
-upgrades are a reviewed one-line change.
-
-Add it once (in whichever environment has network access to the upstream):
-
-```bash
-git submodule add <UPSTREAM_URL> vendor/agency-agents
-git -C vendor/agency-agents checkout <COMMIT_SHA>
-git add .gitmodules vendor/agency-agents
-git commit -m "Pin vendor/agency-agents at <COMMIT_SHA>"
-```
-
-Then record the URL, commit and licence here:
+`vendor/agency-agents` is a **git submodule pinned at a single upstream commit**:
 
 | Field | Value |
 |---|---|
-| Upstream URL | _to confirm_ |
-| Pinned commit | _to confirm_ |
-| Licence | MIT (keep upstream `LICENSE` and copyright notices) |
+| Upstream URL | https://github.com/msitarzewski/agency-agents |
+| Pinned commit | `f99f6aa910a442b0197b768ce0ea7751e35e2060` (2026-10-08, "fix(eval): parse code fences like lib.sh in the outputs eval (#1055)") |
+| Licence | MIT, Copyright (c) 2025 AgentLand Contributors (upstream `LICENSE` kept as is) |
 
-## If the Windows copy already has it
+The pin matches the clone found on the Windows PC on 2026-10-10: a plain
+`git clone` of upstream `main` at that commit, with no local commits and no
+files modified after the clone.
 
-- **Already a submodule** (`.gitmodules` lists it): keep it; record its commit above.
-- **Nested git repo** (has its own `.git`, no `.gitmodules` entry): do not delete
-  its `.git`. Note its `remote -v` and `log -1`, then register it with
-  `git submodule add <that remote> vendor/agency-agents` pointing at the same commit.
-- **Plain directory with local edits**: compare it with upstream first. If it
-  was modified, keep the edits on a fork and submodule the fork, or keep it as a
-  vendored directory and document the tradeoff (no upstream history, manual updates).
+The agency's own personas live in `core/agents/` and do not depend on it. No
+code in `api/` reads `vendor/` yet; the dynamic agent registry will.
+
+## Updating the pin
+
+```bash
+git -C vendor/agency-agents fetch origin
+git -C vendor/agency-agents checkout <NEW_COMMIT_SHA>
+git add vendor/agency-agents
+git commit -m "Bump vendor/agency-agents to <NEW_COMMIT_SHA>"
+```
+
+Do this on a feature branch and open a PR, so the bump is reviewed and CI runs
+against the new agent files. Never commit edits inside `vendor/agency-agents`;
+if the agency needs changes, fork upstream and point the submodule at the fork.
 
 ## Commands for both environments
 
