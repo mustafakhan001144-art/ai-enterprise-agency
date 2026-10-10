@@ -22,9 +22,10 @@ optional stage asks Claude for a plain-language client summary.
 | `api/db.py` | Versioned SQLite schema, hashed API keys, atomic credit debit, credit ledger |
 | `api/admin.py` | CLI: create accounts, issue and revoke keys, set subscriptions |
 | `api/routes/` | `forensics/contain`, `archeology/audit`, `jobs` (status, result, report, evidence), `agents`, `account`, `webhooks/stripe` |
-| `core/registry.py` | Agent registry: the custom personas plus the vendored upstream library |
+| `core/registry.py` | Agent registry: the custom personas, the Agency Agents catalog, and your installed copy of it |
+| `core/workflows/specialists.py` | Routes each job to specialists from the Agency Agents catalog |
 | `core/workflows/` | Deterministic implementations of the custom agents' procedures (forensics, archaeology, management, marketing) |
-| `core/llm.py` | Optional Claude-written client summary; off unless `AGENCY_LLM_PROVIDER=anthropic` |
+| `core/llm.py` | Optional Claude calls (client summary, specialist consults); off unless `AGENCY_LLM_PROVIDER=anthropic` |
 | `api/dashboard/`, `api/routes/dashboard.py` | The web dashboard (plain HTML/JS, no build step) |
 | `core/orchestrator.py`, `core/worker.py` | Runbooks and the durable, lease-based job worker |
 | `core/evidence.py` | `report.md` and the hash-chained `manifest.json` for each finished job |
@@ -33,8 +34,27 @@ optional stage asks Claude for a plain-language client summary.
 | `tests/` | Unit, API, worker, evidence, Stripe and adversarial tests |
 
 Known limits: the technical findings come from deterministic rule implementations,
-not a language model. The only model call is the optional client summary, which
-rewords the executive brief and proposal and adds no findings.
+not a language model. The optional model calls (the client summary and the
+specialist consults) reword or comment on finished reports and add no findings.
+
+## Agency Agents
+
+Every job is staffed from the [Agency Agents](https://github.com/msitarzewski/agency-agents)
+catalog (282 agents). After the reports are written, the engagement director routes
+the job to a lead and to the specialists its findings call for: for example an
+exfiltration incident brings in the Incident Responder and the Cloud Security
+Architect, and a hard-coded secret in legacy code brings in the Secrets & Credential
+Engineer. The roster is in the job's Brief tab, `report.md` and `result.json`, with
+the reason each specialist was assigned.
+
+If you installed the catalog with the Agency Agents app or `scripts/install.sh`, set
+`AGENCY_INSTALLED_AGENTS_DIR` to the install folder (Claude Code puts them in
+`~/.claude/agents`) and jobs use your installed copies instead of the vendored ones;
+`scripts/run-local.ps1` does this automatically when that folder exists. With
+`AGENCY_LLM_PROVIDER=anthropic`, the first `AGENCY_LLM_MAX_CONSULTS` (default 3)
+routed specialists are also consulted: Claude answers as that agent, using the agent's
+own prompt, about the one report it was assigned. The dashboard's Agents panel lets you
+browse and search the whole catalog.
 
 ## See it running (Windows, one command)
 
@@ -87,8 +107,8 @@ then `docker compose exec api python -m api.admin demo` for a key.
 Open http://127.0.0.1:8000/ for the dashboard and http://127.0.0.1:8000/docs for the
 API reference (docs are disabled when `AGENCY_ENVIRONMENT=production`).
 
-To add the Claude-written client summary, set `AGENCY_LLM_PROVIDER=anthropic` and
-`ANTHROPIC_API_KEY` in `.env` and restart the worker.
+To add the Claude-written client summary and specialist consults, set
+`AGENCY_LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` in `.env` and restart the worker.
 
 More: [operations](docs/OPERATIONS.md),
 [Stripe test mode](docs/STRIPE_TEST_MODE.md),

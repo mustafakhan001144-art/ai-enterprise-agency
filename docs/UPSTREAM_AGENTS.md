@@ -14,8 +14,20 @@ The pin matches the clone found on the Windows PC on 2026-10-10: a plain
 `git clone` of upstream `main` at that commit, with no local commits and no
 files modified after the clone.
 
-The agency's own personas live in `core/agents/` and do not depend on it. No
-code in `api/` reads `vendor/` yet; the dynamic agent registry will.
+The agency's own personas live in `core/agents/` and do not depend on it.
+`core/registry.py` loads every catalog agent as `upstream.<division>.<file name>`, and
+`core/workflows/specialists.py` routes each job to the catalog agents its findings call
+for (the `specialist_roster` stage).
+
+## Using your installed copy
+
+Set `AGENCY_INSTALLED_AGENTS_DIR` to a folder of installed agent files, such as
+`~/.claude/agents` (Claude Code) or `~/.github/agents` (GitHub Copilot). Agents are
+matched by file name: an installed file with the same name as a catalog agent replaces
+the vendored copy (the dashboard marks it "installed", or "installed, changed" when it
+differs from the pinned catalog), and installed agents that are not in the catalog are
+listed under an `installed` division. Results record the SHA-256 of the exact prompt
+used, so a report shows which copy produced it.
 
 ## Updating the pin
 
