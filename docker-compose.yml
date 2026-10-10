@@ -1,0 +1,35 @@
+# Local and single-host deployment: the API and one worker share a SQLite volume.
+# Secrets come from .env (never committed); see .env.example and docs/OPERATIONS.md.
+services:
+  api:
+    build: .
+    image: ai-enterprise-agency:local
+    env_file: .env
+    environment:
+      AGENCY_STORAGE_ROOT: /data
+      AGENCY_DATABASE_PATH: /data/database.db
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - agency-data:/data
+    restart: unless-stopped
+
+  worker:
+    image: ai-enterprise-agency:local
+    command: ["python", "-m", "core.worker"]
+    env_file: .env
+    environment:
+      AGENCY_STORAGE_ROOT: /data
+      AGENCY_DATABASE_PATH: /data/database.db
+    volumes:
+      - agency-data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+volumes:
+  agency-data:
