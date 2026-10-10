@@ -85,6 +85,10 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX IF NOT EXISTS credit_ledger_account_idx ON credit_ledger(account_id, id);
     """,
+    # 3: head of the evidence manifest's hash chain, recorded when a job succeeds.
+    """
+    ALTER TABLE jobs ADD COLUMN evidence_head TEXT;
+    """,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

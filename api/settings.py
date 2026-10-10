@@ -7,8 +7,10 @@ Engine-level settings (LLM endpoints, model parameters) live in core/config.py
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+STRIPE_KEY_PREFIXES = ("sk_test_", "sk_live_", "rk_test_", "rk_live_")
 
 
 class CoreSettings(BaseSettings):
@@ -43,6 +45,25 @@ class GatewaySettings(CoreSettings):
     forensics_bytes_per_credit: int = Field(default=64 * 1024, gt=0)
     archeology_audit_credits: int = Field(default=10, gt=0)
     allowed_git_hosts: frozenset[str] = frozenset({"github.com", "gitlab.com", "bitbucket.org"})
+
+    @model_validator(mode="after")
+    def _stripe_test_mode_outside_production(self) -> "GatewaySettings":
+        """Live Stripe keys are only accepted when environment=production."""
+        key = self.stripe_api_key.get_secret_value()
+        if not key.startswith(STRIPE_KEY_PREFIXES):
+            raise ValueError("stripe_api_key must be a Stripe secret or restricted key (sk_... or rk_...)")
+        if self.environment != "production" and key.startswith(("sk_live_", "rk_live_")):
+            raise ValueError(
+                f"a live Stripe key is configured with environment={self.environment}; "
+                "use a test-mode key (sk_test_...) outside production"
+            )
+        if not self.stripe_webhook_secret.get_secret_value().startswith("whsec_"):
+            raise ValueError("stripe_webhook_secret must be a Stripe webhook signing secret (whsec_...)")
+        return self
+
+    @property
+    def stripe_test_mode(self) -> bool:
+        return "_test_" in self.stripe_api_key.get_secret_value()[:8]
 
     @field_validator("plan_credits")
     @classmethod

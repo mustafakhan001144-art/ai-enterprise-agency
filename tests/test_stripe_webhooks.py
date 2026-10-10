@@ -63,3 +63,29 @@ def test_subscription_deleted_zeroes_quota(client, make_account, account_row):
 def test_unknown_customer_ignored(client):
     response = post_event(client, stripe_event("invoice.paid", {"customer": "cus_nobody"}))
     assert response.json()["result"] == "ignored: unknown customer"
+
+
+def test_invoice_paid_writes_one_period_reset_to_the_ledger(client, make_account, settings):
+    import sqlite3
+
+    account_id, key = make_account(used=40, customer="cus_ledger")
+    payload = stripe_event("invoice.paid", {"id": "in_123", "customer": "cus_ledger"}, event_id="evt_ledger")
+    post_event(client, payload)
+    post_event(client, payload)  # replay is ignored
+    with sqlite3.connect(settings.database_path) as conn:
+        rows = conn.execute(
+            "SELECT reason, delta, reference FROM credit_ledger WHERE account_id = ?", (account_id,)
+        ).fetchall()
+    assert rows == [("period_reset", 40, "in_123")]
+    entries = client.get("/api/v1/account/ledger", headers={"Authorization": f"Bearer {key}"}).json()["entries"]
+    assert [(e["reason"], e["delta"]) for e in entries] == [("period_reset", 40)]
+
+
+def test_replayed_event_with_a_new_signature_is_still_a_duplicate(client, make_account, account_row):
+    account_id, _ = make_account(used=10, customer="cus_replay")
+    payload = stripe_event("invoice.paid", {"customer": "cus_replay"}, event_id="evt_replay")
+    assert post_event(client, payload).json()["result"] == "applied"
+    # An attacker cannot reset usage twice by re-signing: the event id is recorded.
+    post_event(client, stripe_event("invoice.payment_failed", {"customer": "cus_replay"}))
+    assert post_event(client, payload, signature=sign_stripe_payload(payload)).json()["result"] == "duplicate"
+    assert account_row(account_id)["subscription_status"] == "past_due"
