@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from core.evidence import write_bundle
 from core.registry import AgentRegistry, RegistryError
 from core.workflows import archaeology, forensics
 from core.workflows.common import canonical_digest
@@ -34,6 +35,7 @@ class PermanentJobError(RuntimeError):
 class RunOutcome:
     result_path: Path
     result_digest: str
+    evidence_head: str
     result: dict
 
 
@@ -143,4 +145,5 @@ def run_job(
     tmp = result_path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(result, sort_keys=True, indent=2), encoding="utf-8")
     tmp.replace(result_path)
-    return RunOutcome(result_path=result_path, result_digest=digest, result=result)
+    manifest = write_bundle(job_dir, run_id, result)
+    return RunOutcome(result_path=result_path, result_digest=digest, evidence_head=manifest["head"], result=result)

@@ -10,11 +10,12 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from api.db import connect, debit_credits, new_id, now_iso
 from api.middleware.auth import Principal, Subscriber
 from api.schemas import JobAccepted, JobPage, JobStatus, JobSummary
+from core.evidence import verify_manifest
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
@@ -91,7 +92,7 @@ async def list_jobs(
 
 
 JOB_COLUMNS = (
-    "id, kind, runbook, status, credits_charged, attempts, error, result_digest, result_path, "
+    "id, kind, runbook, status, credits_charged, attempts, error, result_digest, result_path, evidence_head, "
     "created_at, updated_at, started_at, finished_at"
 )
 
@@ -112,20 +113,50 @@ async def _own_job(request: Request, principal: Principal, job_id: str):
 @router.get("/{job_id}", response_model=JobStatus)
 async def get_job(job_id: str, request: Request, principal: Subscriber) -> JobStatus:
     row = await _own_job(request, principal, job_id)
-    fields = {k: row[k] for k in row.keys() if k not in ("id", "result_path")}
+    fields = {k: row[k] for k in row.keys() if k not in ("id", "result_path", "evidence_head")}
     result_url = f"/api/v1/jobs/{job_id}/result" if row["status"] == "succeeded" else None
     return JobStatus(job_id=row["id"], result_url=result_url, **fields)
+
+
+def _finished_job_dir(request: Request, row, job_id: str) -> Path:
+    if row["status"] != "succeeded" or not row["result_path"]:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"job is {row['status']}, no result yet")
+    jobs_root = request.app.state.settings.jobs_dir.resolve()
+    job_dir = Path(row["result_path"]).resolve().parent
+    if job_dir != (jobs_root / job_id).resolve() or not job_dir.is_dir():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="result files missing")
+    return job_dir
 
 
 @router.get("/{job_id}/result")
 async def get_job_result(job_id: str, request: Request, principal: Subscriber) -> JSONResponse:
     """The JobResult/v1 document for a succeeded job: every stage report plus their digests."""
     row = await _own_job(request, principal, job_id)
-    if row["status"] != "succeeded" or not row["result_path"]:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"job is {row['status']}, no result yet")
-    path = Path(row["result_path"]).resolve()
-    jobs_root = request.app.state.settings.jobs_dir.resolve()
-    if not path.is_relative_to(jobs_root / job_id) or not path.is_file():
+    path = _finished_job_dir(request, row, job_id) / "result.json"
+    if not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="result file missing")
     body = json.loads(path.read_text(encoding="utf-8"))
     return JSONResponse(body, headers={"X-Result-Digest": row["result_digest"] or ""})
+
+
+@router.get("/{job_id}/report", response_class=PlainTextResponse)
+async def get_job_report(job_id: str, request: Request, principal: Subscriber) -> PlainTextResponse:
+    """The human-readable Markdown report rendered from the job result."""
+    row = await _own_job(request, principal, job_id)
+    path = _finished_job_dir(request, row, job_id) / "report.md"
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report missing")
+    return PlainTextResponse(path.read_text(encoding="utf-8"), media_type="text/markdown; charset=utf-8")
+
+
+@router.get("/{job_id}/evidence")
+async def get_job_evidence(job_id: str, request: Request, principal: Subscriber) -> JSONResponse:
+    """The hash-chained evidence manifest, re-verified against the files on disk."""
+    row = await _own_job(request, principal, job_id)
+    job_dir = _finished_job_dir(request, row, job_id)
+    verification = verify_manifest(job_dir, expected_head=row["evidence_head"])
+    manifest_path = job_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else None
+    return JSONResponse(
+        {"job_id": job_id, "recorded_head": row["evidence_head"], "verification": verification, "manifest": manifest}
+    )

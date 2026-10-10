@@ -94,13 +94,14 @@ class Worker:
                     )
                     await conn.commit()
 
-    async def _finish(self, job: dict, *, result_path: Path, digest: str) -> bool:
+    async def _finish(self, job: dict, *, result_path: Path, digest: str, evidence_head: str) -> bool:
         async with connect(self.settings.database_path) as conn:
             cursor = await conn.execute(
-                "UPDATE jobs SET status = 'succeeded', result_path = ?, result_digest = ?, finished_at = ?, "
+                "UPDATE jobs SET status = 'succeeded', result_path = ?, result_digest = ?, evidence_head = ?, "
+                "finished_at = ?, "
                 "updated_at = ?, lease_owner = NULL, lease_expires_at = NULL, error = NULL "
                 "WHERE id = ? AND lease_owner = ? AND status = 'running'",
-                (str(result_path), digest, now_iso(), now_iso(), job["id"], self.worker_id),
+                (str(result_path), digest, evidence_head, now_iso(), now_iso(), job["id"], self.worker_id),
             )
             await conn.commit()
             return cursor.rowcount == 1
@@ -147,7 +148,9 @@ class Worker:
         finally:
             stop.set()
             await beat
-        if await self._finish(job, result_path=outcome.result_path, digest=outcome.result_digest):
+        if await self._finish(
+            job, result_path=outcome.result_path, digest=outcome.result_digest, evidence_head=outcome.evidence_head
+        ):
             return "succeeded"
         log.warning("job %s finished after its lease was taken over; result discarded", job["id"])
         return ""
