@@ -125,9 +125,8 @@ def _forensics_section(outputs: dict) -> list[str]:
         "|---|---|---|",
     ]
     for anomaly in trace.get("anomalies") or []:
-        lines.append(
-            f"| {_cell(anomaly.get('type'))} | {_cell(anomaly.get('detail'))} | {_refs(anomaly.get('evidence_refs'))} |"
-        )
+        detail = _cell(anomaly.get("description") or anomaly.get("detail"))
+        lines.append(f"| {_cell(anomaly.get('type'))} | {detail} | {_refs(anomaly.get('evidence_refs'))} |")
     lines += ["", "### Indicators of compromise", "", "| Type | Value | Evidence |", "|---|---|---|"]
     for ioc in trace.get("iocs") or []:
         lines.append(f"| {_cell(ioc.get('type'))} | `{_cell(ioc.get('value'))}` | {_refs(ioc.get('evidence_refs'))} |")
@@ -138,14 +137,23 @@ def _forensics_section(outputs: dict) -> list[str]:
         f"Tier **{plan.get('tier')}**, status **{plan.get('status')}**. Every action needs a human operator's "
         "approval; nothing has been executed against your systems.",
         "",
-        "| # | Action | Target |",
-        "|---|---|---|",
+        "| # | Action | Target | Justification |",
+        "|---|---|---|---|",
     ]
     for action in plan.get("actions") or []:
-        lines.append(f"| {action.get('order')} | {_cell(action.get('code'))} | {_cell(action.get('target'))} |")
-    gaps = (plan.get("control_gaps") or []) + (trace.get("evidence_gaps") or [])
+        lines.append(
+            f"| {action.get('order')} | {_cell(action.get('code'))} | {_cell(action.get('target'))} "
+            f"| {_cell(action.get('justification'))} |"
+        )
     lines += ["", "## Gaps", ""]
-    lines += [f"- {_cell(g.get('detail') or g.get('type') or g)}" for g in gaps] or ["- none recorded"]
+    gap_lines = [
+        f"- Missing control {g.get('missing_control')} (mandated by {g.get('mandated_by')})"
+        for g in plan.get("control_gaps") or []
+    ]
+    gap_lines += [
+        f"- {_cell(g.get('detail') or g.get('description') or g.get('type'))}" for g in trace.get("evidence_gaps") or []
+    ]
+    lines += gap_lines or ["- none recorded"]
     return lines
 
 

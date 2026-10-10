@@ -316,6 +316,9 @@ def extract(root: Path) -> Extraction:
             )
             continue
         raw = path.read_bytes()
+        if b"\x00" in raw[:8192]:
+            out.gaps.append({"type": "OTHER", "detail": "binary content was not read as source", "file": rel})
+            continue
         text = raw.decode("utf-8", "replace")
         if manifest:
             out.manifests.append({"path": rel, "type": manifest, "content": text})

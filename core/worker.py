@@ -187,8 +187,15 @@ async def _main(once: bool) -> int:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, stop.set)
-    await worker.run_forever(stop)
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except NotImplementedError:
+            # Windows event loops have no signal handlers; Ctrl+C raises KeyboardInterrupt instead.
+            pass
+    try:
+        await worker.run_forever(stop)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
     log.info("worker %s stopped", worker.worker_id)
     return 0
 
@@ -198,7 +205,11 @@ def main() -> int:
     parser.add_argument("--once", action="store_true", help="run at most one job and exit")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    return asyncio.run(_main(args.once))
+    try:
+        return asyncio.run(_main(args.once))
+    except KeyboardInterrupt:
+        log.info("worker interrupted")
+        return 0
 
 
 if __name__ == "__main__":
