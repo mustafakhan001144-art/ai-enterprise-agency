@@ -1,0 +1,44 @@
+# =============================================================================
+# ai-enterprise-agency :: API gateway + core engine dependencies
+# Runtime: CPython 3.11. Install in the container image or a dedicated venv:
+#   python3.11 -m pip install -r requirements.txt
+# For a sealed production image, freeze with hashes:
+#   pip-compile --generate-hashes requirements.txt -o requirements.lock
+# =============================================================================
+
+# --- Public API gateway (api/) ---
+fastapi>=0.115,<1               # HTTP routing, request validation, OpenAPI docs
+uvicorn[standard]>=0.30,<1      # ASGI server (uvloop + httptools in the container)
+stripe>=10.0,<14                # Subscription state + webhook signature verification
+aiosqlite>=0.20,<1              # Async access to storage/database.db (API keys, credits, Stripe state)
+
+# --- Schemas & configuration ---
+pydantic>=2.7,<3                # Request bodies and inter-agent output contracts
+pydantic-settings>=2.3,<3       # Env validation: Stripe keys, LLM endpoints, limits, sandbox paths
+PyYAML>=6.0.1,<7                # Runbook loading (yaml.safe_load only)
+python-dotenv>=1.0,<2           # Local .env loading; secrets are never committed
+
+# --- LLM providers (core/orchestrator.py) ---
+anthropic>=0.40,<1              # Primary provider (async client)
+openai>=1.40,<3                 # Secondary / fallback provider (async client)
+httpx>=0.27,<1                  # Shared async HTTP transport
+tenacity>=8.2,<10               # Bounded, jittered retries for provider and Stripe calls
+
+# --- Engine internals ---
+aiofiles>=23.2,<25              # Non-blocking sandbox file I/O
+networkx>=3.2,<4                # Runbook DAG ordering and cycle detection
+rfc8785>=0.1.2,<1               # Canonical JSON before SHA-256 hashing of audit segments
+cryptography>=42,<46            # Ed25519 signatures on sealed audit segments
+
+# --- Legacy Code Archaeology extraction ---
+tree-sitter>=0.22,<0.25
+tree-sitter-language-pack>=0.2
+lizard>=1.17,<2                 # Cyclomatic complexity / NLOC per function
+packaging>=24.0                 # Version specifier parsing for dependency cartography
+
+# --- Observability ---
+structlog>=24.1                 # JSON logs carrying request_id / job_id
+
+# --- Tests ---
+pytest>=8.0,<9
+pytest-asyncio>=0.23,<1

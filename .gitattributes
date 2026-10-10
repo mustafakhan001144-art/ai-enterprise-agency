@@ -1,0 +1,6 @@
+# Normalise line endings so Windows (CRLF) and Linux (LF) checkouts produce identical commits.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary
+*.pdf binary
