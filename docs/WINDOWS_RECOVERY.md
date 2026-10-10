@@ -35,7 +35,7 @@ git fetch origin
 git symbolic-ref HEAD refs/heads/develop
 git reset origin/develop
 git branch --set-upstream-to=origin/develop
-# 3. Check: "modified" should list only the four empty files above; vendor/agency-agents must NOT appear
+# 3. Check: "modified" should list only .gitignore, api/main.py and requirements.txt; vendor/agency-agents must NOT appear
 git status
 # 4. Fill the empty stubs and the files that exist only on GitHub
 git restore .
