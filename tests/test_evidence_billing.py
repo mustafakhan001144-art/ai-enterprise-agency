@@ -32,7 +32,7 @@ def test_report_is_markdown_and_states_how_it_was_produced(client, finished_job)
     assert response.headers["content-type"].startswith("text/markdown")
     text = response.text
     assert "DATA_EXFILTRATION" in text and "T1_KILL" in text
-    assert "No language model was called" in text
+    assert "no language model was called" in text.lower()
     assert "nothing has been executed against your systems" in text
     assert "paste.example.net" in text
 
@@ -46,6 +46,9 @@ def test_evidence_manifest_covers_every_file_and_verifies(client, finished_job):
         "request.json",
         "stages/01_trace_analysis.json",
         "stages/02_containment_plan.json",
+        "stages/03_quality_review.json",
+        "stages/04_executive_brief.json",
+        "stages/05_follow_up_proposal.json",
         "result.json",
         "report.md",
     ]

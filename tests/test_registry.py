@@ -12,6 +12,10 @@ CUSTOM_IDS = {
     "forensics.agent-containment-specialist",
     "archaeology.dependency-cartographer",
     "archaeology.legacy-code-archaeologist",
+    "management.quality-reviewer",
+    "management.engagement-director",
+    "marketing.engagement-proposal-writer",
+    "marketing.client-brief-writer",
 }
 
 VALID_AGENT = """---
@@ -38,10 +42,18 @@ def test_default_registry_loads_custom_and_upstream_agents():
     assert all(a.agent_id.startswith("upstream.") for a in upstream)
 
 
-def test_empty_custom_divisions_are_reported_not_invented():
+def test_every_custom_division_has_agents():
     snapshot = default_registry().snapshot()
+    for division in ("forensics", "archaeology", "management", "marketing"):
+        assert snapshot.divisions[division]["agent_count"] == 2
+    assert not [w for w in snapshot.warnings if "has no agents" in w]
+
+
+def test_empty_custom_divisions_are_reported_not_invented(tmp_path):
+    (tmp_path / "forensics").mkdir()
+    (tmp_path / "forensics" / "a.md").write_text(VALID_AGENT.replace("management.test-agent", "forensics.a"))
+    snapshot = AgentRegistry(tmp_path, None).snapshot()
     assert snapshot.divisions["management"]["agent_count"] == 0
-    assert snapshot.divisions["marketing"]["agent_count"] == 0
     assert "custom division 'management' has no agents" in snapshot.warnings
     assert "custom division 'marketing' has no agents" in snapshot.warnings
 
@@ -99,8 +111,8 @@ def test_agents_endpoint_lists_and_filters(client, make_account):
     body = client.get("/api/v1/agents?source=custom", headers=auth(key)).json()
     assert {a["agent_id"] for a in body["agents"]} == CUSTOM_IDS
     divisions = {d["division"]: d for d in body["divisions"]}
-    assert divisions["management"]["agent_count"] == 0
-    assert any("management" in w for w in body["warnings"])
+    assert divisions["management"]["agent_count"] == 2
+    assert divisions["marketing"]["agent_count"] == 2
     forensics = client.get("/api/v1/agents?division=forensics", headers=auth(key)).json()["agents"]
     assert {a["agent_id"] for a in forensics} == {i for i in CUSTOM_IDS if i.startswith("forensics.")}
 

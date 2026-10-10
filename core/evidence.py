@@ -194,15 +194,100 @@ def _archaeology_section(outputs: dict) -> list[str]:
     return lines
 
 
+def _brief_section(outputs: dict) -> list[str]:
+    brief = outputs.get("executive_brief")
+    if not brief:
+        return []
+    lines = [
+        "## Executive brief",
+        "",
+        f"- Risk rating: **{brief.get('risk_rating')}**",
+        f"- Release verdict: **{brief.get('release_verdict')}**",
+        "",
+        _cell(brief.get("headline")),
+        "",
+    ]
+    if brief.get("key_findings"):
+        lines += ["### Key findings", "", "| Finding | Source | Evidence |", "|---|---|---|"]
+        for finding in brief["key_findings"]:
+            lines.append(
+                f"| {_cell(finding.get('finding'))} | `{_cell(finding.get('source'))}` "
+                f"| {_refs(finding.get('evidence_refs'))} |"
+            )
+        lines.append("")
+    if brief.get("decisions_required"):
+        lines += ["### Decisions required", ""]
+        for decision in brief["decisions_required"]:
+            flag = " (disruptive)" if decision.get("disruptive") else ""
+            lines.append(f"- {_cell(decision.get('decision'))}{flag}: {_cell(decision.get('why'))}")
+        lines.append("")
+    if brief.get("next_steps"):
+        lines += ["### Next steps", ""] + [f"- {_cell(step)}" for step in brief["next_steps"]] + [""]
+    if brief.get("caveats"):
+        lines += ["### Caveats", ""] + [f"- {_cell(c)}" for c in brief["caveats"]] + [""]
+    return lines
+
+
+def _narrative_section(outputs: dict) -> list[str]:
+    narrative = outputs.get("client_narrative")
+    if not narrative:
+        return []
+    lines = ["## Plain-language summary", ""]
+    if narrative.get("status") == "COMPLETE" and narrative.get("narrative_markdown"):
+        lines += [
+            f"_Written by a language model ({_cell(narrative.get('model'))}) from the executive brief and "
+            "proposal only. The findings above are authoritative._",
+            "",
+            str(narrative["narrative_markdown"]).replace("\r", ""),
+            "",
+        ]
+    else:
+        lines += [f"Not available: {_cell(narrative.get('detail'))}.", ""]
+    return lines
+
+
+def _governance_section(outputs: dict) -> list[str]:
+    lines: list[str] = []
+    qa = outputs.get("quality_review")
+    if qa:
+        failed = [c for c in qa.get("checks") or [] if not c.get("passed")]
+        lines += [
+            "## Quality review",
+            "",
+            f"Verdict **{qa.get('verdict')}**: {len(qa.get('checks') or [])} checks, {len(failed)} failed.",
+            "",
+        ]
+        if failed:
+            lines += ["| Stage | Check | Detail |", "|---|---|---|"]
+            lines += [f"| {c['stage_id']} | {c['check']} | {_cell(c.get('detail'))} |" for c in failed]
+            lines.append("")
+    proposal = outputs.get("follow_up_proposal")
+    if proposal:
+        lines += ["## Follow-up proposal", "", f"Status **{proposal.get('status')}**. {proposal.get('terms')}", ""]
+        if proposal.get("items"):
+            lines += ["| Priority | Service | Triggered by | Credits | Basis |", "|---|---|---|---|---|"]
+            for item in proposal["items"]:
+                lines.append(
+                    f"| {item['priority']} | {_cell(item['title'])} | {_cell(', '.join(item['triggered_by']))} "
+                    f"| {item['estimated_credits']} | {_cell(item['estimate_basis'])} |"
+                )
+            lines += ["", f"Estimated total: **{proposal.get('estimated_credits_total')} credits**.", ""]
+    return lines
+
+
 def render_report(result: dict, job_id: str) -> str:
     lines = [
         f"# Job report: {result.get('runbook')}",
         "",
         f"- Job: `{job_id}`",
         f"- Result schema: {result.get('schema_version')}",
-        "- Produced by deterministic implementations of the agent procedures listed below. "
-        "No language model was called.",
+        f"- Produced by {result.get('generated_by') or 'deterministic procedure implementations'}.",
         "",
+    ]
+    outputs = result.get("outputs") or {}
+    lines += _brief_section(outputs)
+    lines += _narrative_section(outputs)
+    lines += [
         "## Agents",
         "",
         "| Agent | Version | Prompt SHA-256 |",
@@ -217,11 +302,11 @@ def render_report(result: dict, job_id: str) -> str:
             f"| {stage['index']} | {stage['stage_id']} | {stage.get('status')} | {failed} | `{stage['digest']}` |"
         )
     lines.append("")
-    outputs = result.get("outputs") or {}
     if result.get("runbook") == "forensic_incident_response":
         lines += _forensics_section(outputs)
     elif result.get("runbook") == "legacy_archeology_sweep":
         lines += _archaeology_section(outputs)
+    lines += [""] + _governance_section(outputs)
     lines += [
         "",
         "## Verifying this report",

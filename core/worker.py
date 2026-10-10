@@ -28,7 +28,8 @@ from pathlib import Path
 
 from api.db import connect, init_db, now_iso, refund_credits
 from api.settings import CoreSettings, get_core_settings
-from core.orchestrator import Fetcher, PermanentJobError, run_job
+from core.llm import narrator_from_settings
+from core.orchestrator import Fetcher, Narrator, PermanentJobError, run_job
 from core.registry import AgentRegistry, default_registry
 from core.workflows import archaeology
 from core.workflows.common import excerpt
@@ -61,8 +62,10 @@ class Worker:
         *,
         worker_id: str | None = None,
         fetcher: Fetcher = archaeology.git_fetch,
+        narrator: Narrator | None = None,
     ):
         self.settings = settings
+        self.narrator = narrator
         self.registry = registry or default_registry()
         self.worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         self.fetcher = fetcher
@@ -137,7 +140,14 @@ class Worker:
             request_path = Path(job["request_path"])
             request = json.loads(request_path.read_text(encoding="utf-8"))
             outcome = await asyncio.to_thread(
-                run_job, job["runbook"], request, request_path.parent, job["id"], self.registry, self.fetcher
+                run_job,
+                job["runbook"],
+                request,
+                request_path.parent,
+                job["id"],
+                self.registry,
+                self.fetcher,
+                self.narrator,
             )
         except PermanentJobError as exc:
             log.warning("job %s failed permanently: %s", job["id"], exc)
@@ -176,11 +186,16 @@ class Worker:
 async def _main(once: bool) -> int:
     settings = get_core_settings()
     await init_db(settings.database_path)
-    worker = Worker(settings)
+    worker = Worker(settings, narrator=narrator_from_settings(settings))
     snapshot = worker.registry.snapshot()
     for warning in snapshot.warnings:
         log.warning("registry: %s", warning)
-    log.info("worker %s ready with %d agents", worker.worker_id, len(snapshot.agents))
+    log.info(
+        "worker %s ready with %d agents; language-model narrative %s",
+        worker.worker_id,
+        len(snapshot.agents),
+        f"on ({settings.llm_model})" if worker.narrator else "off",
+    )
     if once:
         await worker.run_once()
         return 0

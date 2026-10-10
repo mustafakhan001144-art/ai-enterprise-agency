@@ -1,11 +1,13 @@
 """Gateway settings, validated from the environment at startup.
 
-Engine-level settings (LLM endpoints, model parameters) live in core/config.py
-(Phase 3). Only what the gateway needs to accept, meter and persist requests is here.
+CoreSettings holds what both the gateway and the worker need (storage, worker
+tuning, the optional language-model narrative). GatewaySettings adds Stripe and
+request metering, which only the API process uses.
 """
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,7 +18,7 @@ STRIPE_KEY_PREFIXES = ("sk_test_", "sk_live_", "rk_test_", "rk_live_")
 class CoreSettings(BaseSettings):
     """Settings shared by the gateway and the job worker. Needs no secrets."""
 
-    model_config = SettingsConfigDict(env_prefix="AGENCY_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="AGENCY_", env_file=".env", extra="ignore", populate_by_name=True)
 
     environment: str = Field(default="development", pattern="^(development|staging|production)$")
 
@@ -28,6 +30,20 @@ class CoreSettings(BaseSettings):
     # Attempts before a job is marked failed and its credits are refunded.
     worker_max_attempts: int = Field(default=3, ge=1, le=10)
     worker_poll_seconds: float = Field(default=2.0, gt=0)
+
+    # Optional language-model narrative (core/llm.py). "none" keeps every job fully deterministic.
+    llm_provider: Literal["none", "anthropic"] = "none"
+    llm_model: str = Field(default="claude-opus-5-5", min_length=1, max_length=100)
+    llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    llm_timeout_seconds: float = Field(default=120.0, gt=0)
+    anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
+
+    @model_validator(mode="after")
+    def _llm_key_present(self) -> "CoreSettings":
+        key = self.anthropic_api_key.get_secret_value() if self.anthropic_api_key else ""
+        if self.llm_provider == "anthropic" and not key:
+            raise ValueError("AGENCY_LLM_PROVIDER=anthropic needs ANTHROPIC_API_KEY to be set")
+        return self
 
     @property
     def jobs_dir(self) -> Path:

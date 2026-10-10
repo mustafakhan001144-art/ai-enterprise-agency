@@ -5,10 +5,13 @@
     python -m api.admin revoke-key --prefix aea_AbCdEf
     python -m api.admin list-accounts
     python -m api.admin set-subscription --account <id> --status active --quota 500 [--customer cus_123]
+    python -m api.admin demo [--email demo@localhost] [--quota 500]
 
 Normally Stripe webhooks set subscription status and quota; set-subscription exists
-for local development and support cases. Every quota change is written to the
-credit ledger. A raw API key is printed exactly once and never stored.
+for local development and support cases. `demo` does create-account (active, with
+credits) plus issue-key in one step, for trying the dashboard locally; it refuses to
+run when AGENCY_ENVIRONMENT=production. Every quota change is written to the credit
+ledger. A raw API key is printed exactly once and never stored.
 """
 
 import argparse
@@ -109,6 +112,19 @@ async def set_subscription(account_id: str, status: str, quota: int | None, cust
     return {"account_id": account_id, "subscription_status": status, "credit_quota": new_quota}
 
 
+async def demo(email: str, quota: int) -> dict:
+    if get_settings().environment == "production":
+        raise SystemExit("refusing to create a demo account with AGENCY_ENVIRONMENT=production")
+    account = await create_account(email, quota, "active")
+    key = await issue_key(account["account_id"], "demo")
+    return {
+        **account,
+        "api_key": key["api_key"],
+        "dashboard": "http://127.0.0.1:8000/",
+        "next": "Paste api_key into the dashboard. Keep the worker running so jobs complete.",
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m api.admin", description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -133,6 +149,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--quota", type=int)
     p.add_argument("--customer")
 
+    p = sub.add_parser("demo", help="create an active account with credits and print an API key")
+    p.add_argument("--email", default="demo@localhost")
+    p.add_argument("--quota", type=int, default=500)
+
     args = parser.parse_args(argv)
     if getattr(args, "quota", None) is not None and args.quota < 0:
         parser.error("--quota must be >= 0")
@@ -148,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
             result = asyncio.run(list_accounts())
         case "set-subscription":
             result = asyncio.run(set_subscription(args.account, args.status, args.quota, args.customer))
+        case "demo":
+            result = asyncio.run(demo(args.email, args.quota))
     json.dump(result, sys.stdout, indent=2)
     sys.stdout.write("\n")
     return 0
