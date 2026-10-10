@@ -82,12 +82,21 @@ def test_worker_runs_forensics_job_and_result_is_served(client, make_account, se
     assert result.headers["X-Result-Digest"] == status["result_digest"]
     body = result.json()
     assert body["schema_version"] == "JobResult/v1"
-    assert [s["stage_id"] for s in body["stages"]] == ["trace_analysis", "containment_plan"]
+    assert [s["stage_id"] for s in body["stages"]] == [
+        "trace_analysis",
+        "containment_plan",
+        "quality_review",
+        "executive_brief",
+        "follow_up_proposal",
+    ]
     assert body["outputs"]["trace_analysis"]["primary_class"] == "DATA_EXFILTRATION"
     assert body["outputs"]["containment_plan"]["tier"] == "T1_KILL"
     assert {a["agent_id"] for a in body["agents"]} == {
         "forensics.ai-trace-analyst",
         "forensics.agent-containment-specialist",
+        "management.quality-reviewer",
+        "management.engagement-director",
+        "marketing.engagement-proposal-writer",
     }
     assert all(not s["self_validation_failed"] for s in body["stages"])
     job_dir = settings.jobs_dir / job_id
@@ -101,7 +110,13 @@ def test_worker_runs_archaeology_job_and_deletes_client_source(client, make_acco
     worker = Worker(settings, default_registry(), worker_id="w1", fetcher=fixture_fetcher(tmp_path))
     assert run(worker.run_once()) == "succeeded"
     body = client.get(f"/api/v1/jobs/{job_id}/result", headers=auth(key)).json()
-    assert [s["stage_id"] for s in body["stages"]] == ["dependency_cartography", "code_archaeology"]
+    assert [s["stage_id"] for s in body["stages"]] == [
+        "dependency_cartography",
+        "code_archaeology",
+        "quality_review",
+        "executive_brief",
+        "follow_up_proposal",
+    ]
     units = {u["unit_id"] for u in body["outputs"]["code_archaeology"]["units"]}
     assert "app/main.py::fetch" in units
     assert body["outputs"]["dependency_cartography"]["repository"]["commit"] == "0" * 40

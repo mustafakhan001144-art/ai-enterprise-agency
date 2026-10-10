@@ -34,7 +34,8 @@ auth=(-H "Authorization: Bearer $key")
 
 agents=$(curl -fsS "${auth[@]}" "http://127.0.0.1:$PORT/api/v1/agents?source=custom" \
   | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["agents"]))')
-test "$agents" = "4" || { echo "expected 4 custom agents, got $agents"; exit 1; }
+test "$agents" = "8" || { echo "expected 8 custom agents, got $agents"; exit 1; }
+curl -fsS "http://127.0.0.1:$PORT/dashboard/" | grep -q "AI Audit Agency" || { echo "dashboard not served"; exit 1; }
 
 body='{"subject":{"agent_name":"bot","runtime":"langgraph","declared_egress_allowlist":["api.internal"]},
 "artifacts":[{"artifact_id":"A1","kind":"tool_log","content":[{"ts":"2026-01-01T00:00:00Z","tool":"http_post",

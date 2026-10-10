@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 
 from api.db import connect, init_db
 from api.middleware.body_limit import BodySizeLimitMiddleware
-from api.routes import account, agents, archeology, forensics, jobs, stripe_webhooks
+from api.routes import account, agents, archeology, dashboard, forensics, jobs, stripe_webhooks
 from api.settings import GatewaySettings, get_settings
 from core.registry import AgentRegistry, default_registry
 
@@ -31,7 +31,7 @@ def create_app(settings: GatewaySettings | None = None, registry: AgentRegistry 
 
     app = FastAPI(
         title="AI Enterprise Agency API",
-        version="1.1.0",
+        version="1.2.0",
         lifespan=lifespan,
         docs_url=None if settings.environment == "production" else "/docs",
         redoc_url=None,
@@ -46,6 +46,7 @@ def create_app(settings: GatewaySettings | None = None, registry: AgentRegistry 
     app.include_router(account.router)
     app.include_router(agents.router)
     app.include_router(stripe_webhooks.router)
+    app.include_router(dashboard.router)
 
     @app.get("/healthz", tags=["ops"])
     async def healthz() -> dict:

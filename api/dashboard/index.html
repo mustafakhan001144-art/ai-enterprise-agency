@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Audit Agency</title>
+  <link rel="stylesheet" href="/dashboard/app.css">
+  <script src="/dashboard/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◆</span>
+      <div>
+        <h1>AI Audit Agency</h1>
+        <p class="sub">AI-agent forensics and legacy-code archaeology</p>
+      </div>
+    </div>
+    <div class="health" id="health"><span class="dot"></span><span id="health-text">checking…</span></div>
+  </header>
+
+  <main>
+    <section class="card" id="connect-card">
+      <h2>API key</h2>
+      <form id="key-form" class="row">
+        <input id="key-input" type="password" autocomplete="off" spellcheck="false"
+               placeholder="aea_… (create one with: python -m api.admin demo)" aria-label="API key">
+        <button type="submit">Connect</button>
+        <button type="button" class="ghost" id="key-clear">Forget</button>
+      </form>
+      <p class="muted small" id="key-status">The key stays in this browser only.</p>
+    </section>
+
+    <div id="app" hidden>
+      <section class="stats" id="account"></section>
+
+      <div class="grid">
+        <section class="card">
+          <h2>Start an audit</h2>
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-tab="forensics" role="tab">AI incident</button>
+            <button class="tab" data-tab="archaeology" role="tab">Legacy code</button>
+          </div>
+
+          <form id="forensics-form" class="tabpanel" data-panel="forensics">
+            <p class="muted small">Paste the agent's telemetry as a <code>ForensicsContainRequest</code>.
+              You get a classification, severity and a containment plan. Nothing is executed on your systems.</p>
+            <textarea id="forensics-body" rows="14" spellcheck="false" aria-label="Incident JSON"></textarea>
+            <div class="row">
+              <button type="button" class="ghost" id="load-sample">Load sample incident</button>
+              <span class="spacer"></span>
+              <button type="submit">Run forensics</button>
+            </div>
+          </form>
+
+          <form id="archaeology-form" class="tabpanel" data-panel="archaeology" hidden>
+            <p class="muted small">An HTTPS repository URL on GitHub, GitLab or Bitbucket. The worker clones it into
+              a sandbox, maps dependencies and rates every code unit, then deletes the source.</p>
+            <label>Repository URL
+              <input id="repo-url" type="url" placeholder="https://github.com/owner/repo" required>
+            </label>
+            <label>Branch, tag or commit (optional)
+              <input id="repo-ref" type="text" placeholder="main">
+            </label>
+            <div class="row"><span class="spacer"></span><button type="submit">Run audit</button></div>
+          </form>
+          <p class="msg" id="submit-msg" role="status"></p>
+        </section>
+
+        <section class="card">
+          <div class="row between">
+            <h2>Jobs</h2>
+            <button class="ghost small" id="refresh">Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table class="jobs">
+              <thead><tr><th>Job</th><th>Type</th><th>Status</th><th class="num">Credits</th><th>Created</th></tr></thead>
+              <tbody id="jobs-body"><tr><td colspan="5" class="muted">No jobs yet.</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <section class="card" id="job-detail" hidden>
+        <div class="row between">
+          <h2 id="job-title">Job</h2>
+          <button class="ghost small" id="close-job">Close</button>
+        </div>
+        <div class="tabs" role="tablist" id="job-tabs">
+          <button class="tab active" data-jtab="brief">Brief</button>
+          <button class="tab" data-jtab="report">Full report</button>
+          <button class="tab" data-jtab="evidence">Evidence</button>
+          <button class="tab" data-jtab="raw">Raw result</button>
+        </div>
+        <div id="job-content" class="job-content"></div>
+      </section>
+
+      <div class="grid">
+        <section class="card">
+          <h2>Agents</h2>
+          <div id="agents"></div>
+        </section>
+        <section class="card">
+          <h2>Credit ledger</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>When</th><th>Reason</th><th class="num">Change</th></tr></thead>
+              <tbody id="ledger-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+  <footer class="muted small">API docs at <a href="/docs">/docs</a> (development only).</footer>
+</body>
+</html>

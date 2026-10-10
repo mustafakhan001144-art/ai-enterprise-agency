@@ -192,3 +192,18 @@ def test_revoked_key_is_rejected_even_with_active_subscription(client, make_acco
     with sqlite3.connect(settings.database_path) as conn:
         conn.execute("UPDATE api_keys SET revoked = 1")
     assert client.get("/api/v1/account", headers=auth(key)).status_code == 401
+
+
+def test_admin_demo_creates_an_active_account_with_a_working_key(cli_env, client, capsys):
+    demo = run_cli(capsys, "demo", "--quota", "75")
+    assert demo["subscription_status"] == "active"
+    summary = client.get("/api/v1/account", headers=auth(demo["api_key"])).json()
+    assert summary["credits_remaining"] == 75
+
+
+def test_admin_demo_is_refused_in_production(cli_env, monkeypatch):
+    monkeypatch.setenv("AGENCY_ENVIRONMENT", "production")
+    monkeypatch.setenv("AGENCY_STRIPE_API_KEY", "sk_live_cli")
+    admin.get_settings.cache_clear()
+    with pytest.raises(SystemExit, match="production"):
+        admin.main(["demo"])

@@ -1,8 +1,15 @@
 """Runbooks: the ordered stages a job runs, each bound to an agent in the registry.
 
-The orchestrator is deterministic. Every stage is a Python implementation of the
-procedure its agent persona defines (see core/agents), so the same input always
-produces the same report and digest. No LLM is called.
+Every runbook has two parts. The technical stages (forensics or archaeology) are
+followed by three governance stages that every runbook shares: the management
+division's quality review and executive brief, then the marketing division's
+follow-up proposal. All of these are deterministic Python implementations of the
+procedure their agent persona defines (see core/agents), so the same input always
+produces the same reports.
+
+When a narrator is configured (core/llm.py), one more stage, ``client_narrative``,
+asks a language model to reword the brief and proposal for a non-technical reader.
+It is the only stage that is not deterministic, and its failure never fails the job.
 
 Stage outputs are written to ``<job_dir>/stages/NN_<stage_id>.json`` and the
 combined result to ``<job_dir>/result.json``.
@@ -18,13 +25,21 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from core.evidence import write_bundle
+from core.llm import narrative_report
 from core.registry import AgentRegistry, RegistryError
-from core.workflows import archaeology, forensics
+from core.workflows import archaeology, forensics, management, marketing
 from core.workflows.common import canonical_digest
 
 RESULT_SCHEMA = "JobResult/v1"
 
 Fetcher = Callable[[str, "str | None", Path], "str | None"]
+Narrator = Callable[[dict, dict, str], dict]
+
+GOVERNANCE_AGENTS = (
+    management.QUALITY_REVIEWER_ID,
+    management.ENGAGEMENT_DIRECTOR_ID,
+    marketing.PROPOSAL_WRITER_ID,
+)
 
 
 class PermanentJobError(RuntimeError):
@@ -98,15 +113,23 @@ class Runbook:
 RUNBOOKS: dict[str, Runbook] = {
     "forensic_incident_response": Runbook(
         "forensic_incident_response",
-        (forensics.TRACE_AGENT_ID, forensics.CONTAINMENT_AGENT_ID),
+        (forensics.TRACE_AGENT_ID, forensics.CONTAINMENT_AGENT_ID, *GOVERNANCE_AGENTS),
         _forensics,
     ),
     "legacy_archeology_sweep": Runbook(
         "legacy_archeology_sweep",
-        (archaeology.CARTOGRAPHER_ID, archaeology.ARCHAEOLOGIST_ID),
+        (archaeology.CARTOGRAPHER_ID, archaeology.ARCHAEOLOGIST_ID, *GOVERNANCE_AGENTS),
         _archaeology,
     ),
 }
+
+
+def _governance(runbook_id: str, technical: list[tuple[str, dict]], run_id: str) -> list[tuple[str, dict]]:
+    outputs = dict(technical)
+    qa = management.quality_review(technical, run_id)
+    brief = management.executive_brief(runbook_id, outputs, qa, run_id)
+    proposal = marketing.follow_up_proposal(runbook_id, brief, outputs, run_id)
+    return [("quality_review", qa), ("executive_brief", brief), ("follow_up_proposal", proposal)]
 
 
 def run_job(
@@ -116,12 +139,14 @@ def run_job(
     run_id: str,
     registry: AgentRegistry,
     fetcher: Fetcher = archaeology.git_fetch,
+    narrator: Narrator | None = None,
 ) -> RunOutcome:
     runbook = RUNBOOKS.get(runbook_id)
     if runbook is None:
         raise PermanentJobError(f"unknown runbook {runbook_id!r}")
+    agent_ids = list(runbook.agents) + ([marketing.CLIENT_BRIEF_WRITER_ID] if narrator else [])
     try:
-        agents = registry.require(list(runbook.agents))
+        agents = registry.require(agent_ids)
     except RegistryError as exc:
         raise PermanentJobError(str(exc)) from exc
 
@@ -129,6 +154,16 @@ def run_job(
     if stages_dir.exists():
         shutil.rmtree(stages_dir)  # a retried attempt starts clean
     reports = runbook.run(request, job_dir, run_id, fetcher)
+    reports += _governance(runbook_id, reports, run_id)
+    if narrator is not None:
+        brief, proposal = dict(reports)["executive_brief"], dict(reports)["follow_up_proposal"]
+        try:
+            narrative = narrator(brief, proposal, run_id)
+        except Exception as exc:  # noqa: BLE001 - the narrative is optional; the audit result stands without it
+            narrative = narrative_report(
+                brief, proposal, status="FAILED", model=None, text=None, detail=type(exc).__name__, run_id=run_id
+            )
+        reports.append(("client_narrative", narrative))
     stage_index = [_write_stage(job_dir, i, stage_id, report) for i, (stage_id, report) in enumerate(reports, 1)]
 
     result = {
@@ -138,7 +173,11 @@ def run_job(
         "agents": [{"agent_id": a.agent_id, "version": a.version, "prompt_sha256": a.prompt_sha256} for a in agents],
         "stages": stage_index,
         "outputs": {stage_id: report for stage_id, report in reports},
-        "generated_by": "deterministic procedure implementations; no language model was called",
+        "generated_by": (
+            "deterministic procedure implementations; client_narrative was written by a language model"
+            if narrator
+            else "deterministic procedure implementations; no language model was called"
+        ),
     }
     digest = canonical_digest(result)
     result_path = job_dir / "result.json"
