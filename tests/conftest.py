@@ -3,23 +3,16 @@
 import hashlib
 import hmac
 import json
-import os
 import sqlite3
 import time
 import uuid
 
 import pytest
+from fastapi.testclient import TestClient
 
-# api.main builds a module-level app from the environment at import time, so
-# placeholder values must exist before any test imports it.
-os.environ.setdefault("AGENCY_STRIPE_API_KEY", "sk_test_placeholder")
-os.environ.setdefault("AGENCY_STRIPE_WEBHOOK_SECRET", "whsec_placeholder")
-
-from fastapi.testclient import TestClient  # noqa: E402
-
-from api.db import hash_api_key, now_iso  # noqa: E402
-from api.main import create_app  # noqa: E402
-from api.settings import GatewaySettings  # noqa: E402
+from api.db import hash_api_key, now_iso
+from api.main import create_app
+from api.settings import GatewaySettings
 
 WEBHOOK_SECRET = "whsec_test_secret"
 PRICE_ID = "price_test_basic"

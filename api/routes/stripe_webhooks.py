@@ -6,7 +6,8 @@ once (event ids are recorded in the same transaction as the state change).
 Handled events:
   customer.subscription.created / updated -> status + plan quota from the price id
   customer.subscription.deleted           -> status 'canceled', quota 0
-  invoice.paid                            -> new billing period: credits_used reset to 0
+  invoice.paid                            -> new billing period: credits_used reset to 0,
+                                             recorded in the ledger as period_reset
   invoice.payment_failed                  -> status 'past_due' (API returns 402)
 Anything else is acknowledged and ignored.
 """
@@ -17,7 +18,7 @@ import aiosqlite
 import stripe
 from fastapi import APIRouter, Header, HTTPException, Request, status
 
-from api.db import connect, now_iso
+from api.db import connect, now_iso, record_ledger
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 log = logging.getLogger("api.stripe")
@@ -54,15 +55,28 @@ async def _apply_event(conn: aiosqlite.Connection, event: dict, plan_credits: di
                 (timestamp, customer),
             )
         case "invoice.paid":
+            row = await (
+                await conn.execute("SELECT id, credits_used FROM accounts WHERE stripe_customer_id = ?", (customer,))
+            ).fetchone()
             cursor = await conn.execute(
                 "UPDATE accounts SET credits_used = 0, subscription_status = 'active', "
                 "updated_at = ? WHERE stripe_customer_id = ?",
                 (timestamp, customer),
             )
+            if row is not None:
+                # The ledger records the credits returned by the new period, so its
+                # running total stays equal to -credits_used.
+                await record_ledger(
+                    conn,
+                    row["id"],
+                    row["credits_used"],
+                    "period_reset",
+                    reference=obj.get("id") or event["id"],
+                    created_at=timestamp,
+                )
         case "invoice.payment_failed":
             cursor = await conn.execute(
-                "UPDATE accounts SET subscription_status = 'past_due', updated_at = ? "
-                "WHERE stripe_customer_id = ?",
+                "UPDATE accounts SET subscription_status = 'past_due', updated_at = ? WHERE stripe_customer_id = ?",
                 (timestamp, customer),
             )
         case _:

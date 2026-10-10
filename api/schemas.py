@@ -102,5 +102,73 @@ class JobStatus(BaseModel):
     runbook: str
     status: str
     credits_charged: int
+    attempts: int
+    error: str | None
+    result_digest: str | None
+    result_url: str | None
     created_at: datetime
     updated_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class JobSummary(BaseModel):
+    job_id: str
+    kind: str
+    runbook: str
+    status: str
+    credits_charged: int
+    created_at: datetime
+
+
+class JobPage(BaseModel):
+    jobs: list[JobSummary]
+
+
+class AccountSummary(BaseModel):
+    account_id: str
+    subscription_status: str
+    credit_quota: int
+    credits_used: int
+    credits_remaining: int
+
+
+class LedgerEntry(BaseModel):
+    id: int
+    delta: int
+    reason: str
+    job_id: str | None
+    reference: str | None
+    created_at: datetime
+
+
+class LedgerPage(BaseModel):
+    entries: list[LedgerEntry]
+    next_before_id: int | None
+
+
+class AgentInfo(BaseModel):
+    agent_id: str
+    name: str
+    division: str
+    source: str
+    description: str
+    version: str | None
+    output_schema: str | None
+    upstream: list[str]
+    downstream: list[str]
+    path: str
+    prompt_sha256: str
+
+
+class DivisionInfo(BaseModel):
+    division: str
+    label: str
+    source: str
+    agent_count: int
+
+
+class AgentPage(BaseModel):
+    agents: list[AgentInfo]
+    divisions: list[DivisionInfo]
+    warnings: list[str]

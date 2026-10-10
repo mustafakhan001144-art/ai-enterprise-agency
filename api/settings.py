@@ -7,11 +7,15 @@ Engine-level settings (LLM endpoints, model parameters) live in core/config.py
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+STRIPE_KEY_PREFIXES = ("sk_test_", "sk_live_", "rk_test_", "rk_live_")
 
-class GatewaySettings(BaseSettings):
+
+class CoreSettings(BaseSettings):
+    """Settings shared by the gateway and the job worker. Needs no secrets."""
+
     model_config = SettingsConfigDict(env_prefix="AGENCY_", env_file=".env", extra="ignore")
 
     environment: str = Field(default="development", pattern="^(development|staging|production)$")
@@ -19,6 +23,18 @@ class GatewaySettings(BaseSettings):
     storage_root: Path = Path("storage")
     database_path: Path = Path("storage/database.db")
 
+    # How long a worker owns a claimed job before another worker may take it over.
+    worker_lease_seconds: int = Field(default=300, ge=10)
+    # Attempts before a job is marked failed and its credits are refunded.
+    worker_max_attempts: int = Field(default=3, ge=1, le=10)
+    worker_poll_seconds: float = Field(default=2.0, gt=0)
+
+    @property
+    def jobs_dir(self) -> Path:
+        return self.storage_root / "code_sandboxes"
+
+
+class GatewaySettings(CoreSettings):
     stripe_api_key: SecretStr
     stripe_webhook_secret: SecretStr
     # Maps a Stripe Price ID to the monthly credit quota it grants, e.g.
@@ -30,6 +46,25 @@ class GatewaySettings(BaseSettings):
     archeology_audit_credits: int = Field(default=10, gt=0)
     allowed_git_hosts: frozenset[str] = frozenset({"github.com", "gitlab.com", "bitbucket.org"})
 
+    @model_validator(mode="after")
+    def _stripe_test_mode_outside_production(self) -> "GatewaySettings":
+        """Live Stripe keys are only accepted when environment=production."""
+        key = self.stripe_api_key.get_secret_value()
+        if not key.startswith(STRIPE_KEY_PREFIXES):
+            raise ValueError("stripe_api_key must be a Stripe secret or restricted key (sk_... or rk_...)")
+        if self.environment != "production" and key.startswith(("sk_live_", "rk_live_")):
+            raise ValueError(
+                f"a live Stripe key is configured with environment={self.environment}; "
+                "use a test-mode key (sk_test_...) outside production"
+            )
+        if not self.stripe_webhook_secret.get_secret_value().startswith("whsec_"):
+            raise ValueError("stripe_webhook_secret must be a Stripe webhook signing secret (whsec_...)")
+        return self
+
+    @property
+    def stripe_test_mode(self) -> bool:
+        return "_test_" in self.stripe_api_key.get_secret_value()[:8]
+
     @field_validator("plan_credits")
     @classmethod
     def _quotas_positive(cls, value: dict[str, int]) -> dict[str, int]:
@@ -38,11 +73,12 @@ class GatewaySettings(BaseSettings):
             raise ValueError(f"negative credit quota for prices: {bad}")
         return value
 
-    @property
-    def jobs_dir(self) -> Path:
-        return self.storage_root / "code_sandboxes"
-
 
 @lru_cache
 def get_settings() -> GatewaySettings:
     return GatewaySettings()
+
+
+@lru_cache
+def get_core_settings() -> CoreSettings:
+    return CoreSettings()
