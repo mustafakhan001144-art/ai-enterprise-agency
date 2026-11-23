@@ -18,8 +18,8 @@ router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
 async def list_agents(
     request: Request,
     principal: Subscriber,
-    division: Annotated[str | None, Query(pattern="^[a-z0-9-]{1,60}$")] = None,
-    source: Annotated[str | None, Query(pattern="^(custom|upstream)$")] = None,
+    division: Annotated[str | None, Query(pattern="^[a-z0-9.-]{1,60}$")] = None,
+    source: Annotated[str | None, Query(pattern="^(custom|upstream|installed)$")] = None,
 ) -> AgentPage:
     snapshot = request.app.state.registry.snapshot()
     agents = [
@@ -28,7 +28,7 @@ async def list_agents(
         if (division is None or agent.division == division) and (source is None or agent.source == source)
     ]
     divisions = [DivisionInfo(division=name, **info) for name, info in sorted(snapshot.divisions.items())]
-    return AgentPage(agents=agents, divisions=divisions, warnings=snapshot.warnings)
+    return AgentPage(agents=agents, divisions=divisions, warnings=snapshot.warnings, installed=snapshot.installed)
 
 
 @router.get("/{agent_id}", response_model=AgentInfo)

@@ -7,7 +7,9 @@
 #   1. creates .venv with Python 3.12 or 3.11 if it does not exist, and installs requirements.lock
 #   2. creates .env from .env.example if there is no .env (an existing .env is never changed)
 #   3. creates a demo account with 500 credits the first time, and saves its key to storage\demo-key.txt
-#   4. opens the API and the worker in two new PowerShell windows, then opens the dashboard
+#   4. uses your installed Agency Agents (%USERPROFILE%\.claude\agents) if that folder exists
+#      and .env does not already set AGENCY_INSTALLED_AGENTS_DIR
+#   5. opens the API and the worker in two new PowerShell windows, then opens the dashboard
 # Stop everything by closing the two windows (or Ctrl+C in each).
 param([switch]$Reinstall, [int]$Port = 8000)
 
@@ -48,6 +50,14 @@ if (-not (Test-Path $keyFile)) {
     Set-Content -Path $keyFile -Value $demo.api_key -NoNewline -Encoding ascii
 }
 $key = Get-Content $keyFile -Raw
+
+$installed = Join-Path $HOME ".claude\agents"
+$envSetsIt = Select-String -Path ".env" -Pattern "^\s*AGENCY_INSTALLED_AGENTS_DIR\s*=" -Quiet
+if (-not $env:AGENCY_INSTALLED_AGENTS_DIR -and -not $envSetsIt -and (Test-Path $installed)) {
+    $count = (Get-ChildItem -Path $installed -Filter *.md -File).Count
+    $env:AGENCY_INSTALLED_AGENTS_DIR = $installed
+    Write-Host "Using your installed Agency Agents: $count files in $installed"
+}
 
 $activate = ". '$root\.venv\Scripts\Activate.ps1'; Set-Location '$root'"
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "$activate; `$host.UI.RawUI.WindowTitle = 'Agency API'; uvicorn api.main:create_app --factory --host 127.0.0.1 --port $Port"

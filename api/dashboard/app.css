@@ -140,4 +140,11 @@ pre.raw { background: var(--surface-2); padding: 12px; border-radius: 8px; overf
   .topbar { padding: 12px 16px; flex-wrap: wrap; }
   .card { padding: 14px; }
 }
+.catalog-title { margin-top: 18px; }
+#catalog-search { margin: 4px 0 10px; }
+#catalog { max-height: 520px; overflow-y: auto; }
+.catalog-division { border-top: 1px solid var(--border); padding: 6px 0; }
+.catalog-division summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.catalog-division .agent { margin-left: 4px; }
+[hidden] { display: none !important; }
 .msg, .headline, .card p, .agent, li { overflow-wrap: anywhere; }

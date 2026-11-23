@@ -42,6 +42,7 @@ const STATUS_CLASS = {
   succeeded: "b-ok", failed: "b-bad", running: "b-info", queued: "b-muted",
   CRITICAL: "b-bad", HIGH: "b-bad", MEDIUM: "b-warn", LOW: "b-ok", NONE: "b-muted",
   RELEASE: "b-ok", RELEASE_WITH_CAVEATS: "b-warn", HOLD: "b-bad",
+  STAFFED: "b-ok", PARTIAL: "b-warn", CATALOG_UNAVAILABLE: "b-muted",
   P1: "b-bad", P2: "b-warn", P3: "b-muted",
   active: "b-ok", trialing: "b-ok", past_due: "b-warn", canceled: "b-bad", inactive: "b-muted",
 };
@@ -147,7 +148,6 @@ function renderJobs(jobs) {
 
 function renderAgents(page) {
   const custom = page.agents.filter((a) => a.source === "custom");
-  const upstream = page.agents.filter((a) => a.source === "upstream");
   const groups = {};
   custom.forEach((a) => (groups[a.division] = groups[a.division] || []).push(a));
   const order = ["forensics", "archaeology", "management", "marketing"];
@@ -163,11 +163,59 @@ function renderAgents(page) {
           .join("")}</div>`
     )
     .join("");
-  html += `<p class="muted small">Plus ${upstream.length} reference agents from the vendored upstream library.</p>`;
+  html += renderCatalog(page);
   if (page.warnings && page.warnings.length) {
     html += `<p class="small">${page.warnings.slice(0, 3).map((w) => `<span class="b-warn">${esc(w)}</span>`).join("<br>")}</p>`;
   }
   $("#agents").innerHTML = html;
+  const search = $("#catalog-search");
+  if (search) search.addEventListener("input", () => filterCatalog(search.value));
+}
+
+// The Agency Agents catalog (msitarzewski/agency-agents), grouped by division.
+function renderCatalog(page) {
+  const catalog = page.agents.filter((a) => a.source === "upstream" || a.source === "installed");
+  if (!catalog.length) return '<p class="muted small">The Agency Agents catalog is not loaded. Run <code>git submodule update --init</code> or set AGENCY_INSTALLED_AGENTS_DIR.</p>';
+  const labels = Object.fromEntries((page.divisions || []).map((d) => [d.division, d.label]));
+  const groups = {};
+  catalog.forEach((a) => (groups[a.division] = groups[a.division] || []).push(a));
+  const installed = catalog.filter((a) => a.location === "installed");
+  const modified = installed.filter((a) => a.modified).length;
+  const source = installed.length
+    ? `${installed.length} read from your installed folder${modified ? `, ${modified} of them changed from the catalog` : ""}.`
+    : "Read from the copy vendored in this repository.";
+  const divisions = Object.keys(groups)
+    .sort((a, b) => groups[b].length - groups[a].length || a.localeCompare(b))
+    .map(
+      (d) => `<details class="catalog-division"><summary>${esc(labels[d] || d)} ${badge(String(groups[d].length))}</summary>
+        ${groups[d]
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(
+            (a) => `<div class="agent" data-search="${esc(`${a.name} ${a.description} ${a.agent_id}`.toLowerCase())}">
+              <div class="name">${esc(a.name)}${a.location === "installed" ? ` <span class="badge ${a.modified ? "b-warn" : "b-ok"}">${a.modified ? "installed, changed" : "installed"}</span>` : ""}</div>
+              <div class="desc">${esc(a.description)}</div></div>`
+          )
+          .join("")}</details>`
+    )
+    .join("");
+  return `<h3 class="catalog-title">Agency Agents catalog ${badge(String(catalog.length))}</h3>
+    <p class="muted small">Jobs are staffed from these agents. ${source}</p>
+    <input id="catalog-search" type="search" placeholder="Search ${catalog.length} agents" aria-label="Search the agent catalog">
+    <div id="catalog">${divisions}</div>`;
+}
+
+function filterCatalog(query) {
+  const q = query.trim().toLowerCase();
+  document.querySelectorAll("#catalog .catalog-division").forEach((group) => {
+    let shown = 0;
+    group.querySelectorAll(".agent").forEach((agent) => {
+      const match = !q || agent.dataset.search.includes(q);
+      agent.hidden = !match;
+      shown += match ? 1 : 0;
+    });
+    group.hidden = shown === 0;
+    group.open = Boolean(q) && shown > 0;
+  });
 }
 
 function renderLedger(page) {
@@ -223,6 +271,33 @@ function renderBrief(result) {
       html += `<p class="muted small">${esc(proposal.terms)}</p>`;
     }
   }
+  html += renderTeam(o.specialist_roster, o.specialist_consults);
+  return html;
+}
+
+function renderTeam(roster, consults) {
+  if (!roster) return "";
+  const notes = Object.fromEntries(((consults && consults.consults) || []).map((c) => [c.agent_id, c]));
+  let html = `<h3>Specialist team ${badge(roster.status)}</h3>
+    <p class="muted small">Staffed from the Agency Agents catalog (${esc(roster.catalog?.agents_available ?? 0)} agents available${roster.catalog?.installed_copies_used ? `, ${esc(roster.catalog.installed_copies_used)} assigned from your installed folder` : ""}).</p>`;
+  if (roster.assignments?.length) {
+    html += `<div class="table-wrap"><table><thead><tr><th>Specialist</th><th>Task</th></tr></thead><tbody>
+      ${roster.assignments
+        .map((a) => {
+          const note = notes[a.agent_id];
+          const body = note
+            ? note.status === "COMPLETE" && note.notes_markdown
+              ? `<div class="narrative md">${markdown(note.notes_markdown)}</div><div class="muted small">Written by ${esc(note.model)} using this agent's prompt.</div>`
+              : `<div class="muted small">Consult not available: ${esc(note.detail)}</div>`
+            : "";
+          return `<tr><td><strong>${esc(a.name)}</strong>${a.role === "lead" ? ' <span class="badge b-info">lead</span>' : ""}
+            <div class="muted small mono">${esc(a.catalog_name)}</div></td>
+            <td>${esc(a.task)}<div class="muted small">Because: ${esc(a.triggered_by.join(", "))}</div>${body}</td></tr>`;
+        })
+        .join("")}
+      </tbody></table></div>`;
+  }
+  if (roster.not_found?.length) html += `<p class="muted small">Not in the catalog: ${esc(roster.not_found.join(", "))}</p>`;
   return html;
 }
 

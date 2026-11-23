@@ -49,6 +49,7 @@ def test_evidence_manifest_covers_every_file_and_verifies(client, finished_job):
         "stages/03_quality_review.json",
         "stages/04_executive_brief.json",
         "stages/05_follow_up_proposal.json",
+        "stages/06_specialist_roster.json",
         "result.json",
         "report.md",
     ]

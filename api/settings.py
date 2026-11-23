@@ -37,6 +37,12 @@ class CoreSettings(BaseSettings):
     llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
     llm_timeout_seconds: float = Field(default=120.0, gt=0)
     anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
+    # How many routed specialists from the Agency Agents catalog the model consults per job (0 = none).
+    llm_max_consults: int = Field(default=3, ge=0, le=10)
+
+    # A folder of installed Agency Agents files, e.g. ~/.claude/agents. When set, an installed
+    # file replaces the vendored catalog copy with the same name, so jobs use the installed agents.
+    installed_agents_dir: Path | None = None
 
     @model_validator(mode="after")
     def _llm_key_present(self) -> "CoreSettings":
